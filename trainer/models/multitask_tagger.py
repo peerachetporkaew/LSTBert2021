@@ -47,7 +47,7 @@ class MultiTaskTagger(nn.Module):
         
         all_layers = self.bert.extract_features(token_batch, return_all_hiddens=True)
         last_layer = all_layers[-1]
-        ic("ALL Layer size",all_layers[-1].size())
+        #ic("ALL Layer size",all_layers[-1].size())
 
         embedded = last_layer
         pos_pred  = self.fc_pos(self.dropout(embedded))

@@ -39,7 +39,7 @@ def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_be
 def mycollate_tokens(pad_index):
 
     def myfunc(values):
-        ic("myfunc",len(values))
+        #ic("myfunc",len(values))
 
         return [collate_tokens([values[i][0] for i in range(len(values))],pad_idx=pad_index), 
                 collate_tokens([values[i][1] for i in range(len(values))],pad_idx=pad_index),
@@ -84,7 +84,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
 
     def __init__(self, model, optimizer, criterion=None, traindata = None, validdata = None):
         super().__init__()
-        self.automatic_optimization = False
+        self.automatic_optimization = True
+
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
@@ -101,14 +102,28 @@ class MultiTaskTaggingModule(pl.LightningModule):
         return self.validdata
 
     def training_step(self,train_batch, batch_idx):
-        self.optimizer.zero_grad()
-        ic(train_batch[0].size())
-        ic(train_batch[1].size())
-        predict = self.model.forward(train_batch[0])
-        return 0.0
+        #self.optimizer.zero_grad()
 
-    def training_step_end(self,outputs):
-        return 0.0
+        #ic(train_batch[0].size())
+        #ic(train_batch[1].size())
+        loss = torch.tensor([0.0]).sum()
+
+        if True:
+            predictions, _, _ = self.model.forward(train_batch[0])
+        
+            #Calcuate Loss
+            trg = train_batch[1]
+            predictions = predictions.view(-1, predictions.shape[-1])
+            tags = trg.view(-1).long()
+            loss = self.criterion(predictions, tags)
+            self.log('loss', loss.item(),prog_bar=True)
+
+            #Calcuate Accuracy
+            batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
+            batch_prediction = batch_prediction.squeeze(-1)
+
+        return loss
+
 
 @register_task("multitask-tagging")
 class MultiTaskTagging(Task):
@@ -143,7 +158,7 @@ class MultiTaskTagging(Task):
 
         #Setup Optimizer
         LEARNING_RATE = args.lr
-        optimizer = optim.Adam(model.parameters(), lr = LEARNING_RATE)
+        optimizer = optim.Adam(model.parameters(), lr = LEARNING_RATE,betas=(0.9, 0.98), eps=1e-9)
 
         #Setup Dataset
         ic("Loading POS dataset ...")
@@ -151,13 +166,7 @@ class MultiTaskTagging(Task):
         trainSetpos = build_data_iterator(args,args.traindata,dataset="pos",type="train")
         trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
                                                     label_encoder=pos_dict.encode_line)
-
-        ic(len(trainSetPos_tensor),len(trainSetPos_tensor[0]))
-
-
-        corpus = [[a,b,c] for a,b,c in zip(trainSetPos_tensor[0], trainSetPos_tensor[1], trainSetPos_tensor[2])]
-
-        trainPosData = DataLoader(corpus, 
+        trainPosData = DataLoader(trainSetPos_tensor, 
                                   batch_size=args.batch_size, 
                                   shuffle=True, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
@@ -165,29 +174,20 @@ class MultiTaskTagging(Task):
         validSetpos = build_data_iterator(args,args.traindata,dataset="pos",type="eval")
         validSetPos_tensor = self.convert_to_tensor(validSetpos,
                                                     label_encoder=pos_dict.encode_line)
-
-
         validPosData = DataLoader(validSetPos_tensor, 
                                   batch_size=args.batch_size, 
                                   shuffle=False, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
 
-        """
-        for t in trainPosData:
-            print(t)
-            time.sleep(5)
-        
-        trainSet_pos, validSet_pos, testSet_pos = build_dataloader(args.traindata,dataset="pos",batch_size=args.batch_size)
-        
-        trainSet_ne, validSet_ne, testSet_ne = build_dataloader(args.traindata,dataset="ne",batch_size=args.batch_size)
-
-        trainSet_sent, validSet_sent, testSet_sent = build_dataloader(args.traindata,dataset="sent",batch_size=args.batch_size)
-        """
-
         #Setup Trainer
         ic("Loading trainer ...")
+        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune', monitor = 'val_loss',
+                        save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:.3f}")
+
+        earlystop_callback = EarlyStopping(monitor='val_loss', patience=8, mode='min', check_on_train_epoch_end=False,verbose=True)
+
         self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainPosData,validPosData)
-        self.trainer = pl.Trainer(gpus=[0], reload_dataloaders_every_n_epochs=1)
+        self.trainer = pl.Trainer(gpus=[0], val_check_interval=300, reload_dataloaders_every_n_epochs=1)
         return None
 
     def convert_to_tensor(self,data, label_encoder):
@@ -205,9 +205,6 @@ class MultiTaskTagging(Task):
             if idx % 100 == 0:
                 ic(idx)
 
-            if idx == 200:
-                break
-
             trgBPEList, srcBPEList, trgORIList = map_pos_to_bpe(self.model.bert,batch)
             
             srcBPETensor.extend([srcDict.encode_line(lineT, append_eos=False, add_if_not_exist=False) for lineT in srcBPEList])
@@ -216,7 +213,7 @@ class MultiTaskTagging(Task):
 
             trgORITensor.extend([label_encoder(lineT, append_eos=False, add_if_not_exist=False) for lineT in trgORIList])
 
-        return srcBPETensor, trgBPETensor, trgORITensor
+        return list(zip(srcBPETensor, trgBPETensor, trgORITensor))
     
     def train(self):
         self.trainer.fit(self.plmodel)
