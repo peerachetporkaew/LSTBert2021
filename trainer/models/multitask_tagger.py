@@ -2,10 +2,24 @@ from ..utils import build_dataloader
 from . import register_model
 
 import torch.nn as nn
+import torch
 
 from fairseq.data.dictionary import Dictionary
 from fairseq.data.data_utils import collate_tokens
 from fairseq.models.roberta import RobertaModel
+
+init_funcs = {
+    1: lambda x: torch.nn.init.normal_(x, mean=0., std=1.), # can be bias
+    2: lambda x: torch.nn.init.xavier_normal_(x, gain=1.), # can be weight
+    3: lambda x: torch.nn.init.xavier_uniform_(x, gain=1.), # can be conv1D filter
+    4: lambda x: torch.nn.init.xavier_uniform_(x, gain=1.), # can be conv2D filter
+    "default": lambda x: torch.nn.init.constant(x, 1.), # everything else
+}
+
+def init_all(model, init_funcs):
+    for p in model.parameters():
+        init_func = init_funcs.get(len(p.shape), init_funcs["default"])
+        init_func(p)
 
 @register_model("multitask-tagger")
 class MultiTaskTagger(nn.Module):
@@ -37,6 +51,9 @@ class MultiTaskTagger(nn.Module):
     def load_pretrained(self,pretrained="lst"):
         if pretrained == "lst":
             roberta = RobertaModel.from_pretrained('./checkpoints/lstbertbest/', checkpoint_file='checkpoint_best.pt',bpe="subword_nmt", bpe_codes="./checkpoints/lstbertbest/th_18M.50000.bpe",data_name_or_path=".:")
+
+            #init_all(roberta,init_funcs)
+
             return roberta
         return None
 
@@ -46,7 +63,7 @@ class MultiTaskTagger(nn.Module):
         """
         
         all_layers = self.bert.extract_features(token_batch, return_all_hiddens=True)
-        last_layer = all_layers[-1]
+        last_layer = all_layers[1]
         #ic("ALL Layer size",all_layers[-1].size())
 
         embedded = last_layer

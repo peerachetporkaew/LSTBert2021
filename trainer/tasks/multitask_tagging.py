@@ -100,7 +100,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
         self.criterion = criterion
         self.traindata = traindata
         self.validdata = validdata
-        
+
     def configure_optimizers(self):
         return self.optimizer
     
@@ -114,6 +114,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
         loss = torch.tensor([0.0]).sum()
         if True:
             predictions, _, _ = self.model.forward(train_batch[0])
+            #_, predictions, _ = self.model.forward(train_batch[0])
         
             #Calcuate Loss
             trg = train_batch[1]
@@ -131,7 +132,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
         loss = torch.tensor([0.0]).sum()
         if True:
             predictions, _, _ = self.model.forward(val_batch[0][:,0:500])
-        
+            #_, predictions, _ = self.model.forward(val_batch[0][:,0:500])
+            
             #Calcuate Loss
             trg = val_batch[1]
             predictions = predictions.view(-1, predictions.shape[-1])
@@ -207,17 +209,22 @@ class MultiTaskTagging(Task):
         #Setup Dataset
         ic("Loading POS dataset ...")
         ic(args.batch_size)
-        trainSetpos = build_data_iterator(args,args.traindata,dataset="pos",type="train")
+
+        dataset = "pos"
+        #dataset = "ne"
+        taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict}
+
+        trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
         trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
-                                                    label_encoder=pos_dict.encode_line)
+                                                    label_encoder=taskdict[dataset].encode_line)
         trainPosData = DataLoader(trainSetPos_tensor, 
                                   batch_size=args.batch_size, 
                                   shuffle=True, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetpos = build_data_iterator(args,args.traindata,dataset="pos",type="eval")
+        validSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type="eval")
         validSetPos_tensor = self.convert_to_tensor(validSetpos,
-                                                    label_encoder=pos_dict.encode_line)
+                                                    label_encoder=taskdict[dataset].encode_line)
         validPosData = DataLoader(validSetPos_tensor, 
                                   batch_size=args.batch_size, 
                                   shuffle=False, 
@@ -225,8 +232,7 @@ class MultiTaskTagging(Task):
 
         #Setup Trainer
         ic("Loading trainer ...")
-        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_loss',
-                        save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:.3f}-{val_acc:.3f}")
+        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_loss', save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:.3f}-{val_acc:.3f}")
 
         earlystop_callback = EarlyStopping(monitor='val_loss', patience=8, mode='min', check_on_train_epoch_end=False,verbose=True)
 
