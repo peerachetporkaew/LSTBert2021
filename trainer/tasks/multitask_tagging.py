@@ -43,7 +43,8 @@ def mycollate_tokens(pad_index):
 
         return [collate_tokens([values[i][0] for i in range(len(values))],pad_idx=pad_index), 
                 collate_tokens([values[i][1] for i in range(len(values))],pad_idx=pad_index),
-                collate_tokens([values[i][2] for i in range(len(values))],pad_idx=pad_index)]
+                collate_tokens([values[i][2] for i in range(len(values))],pad_idx=pad_index),
+                collate_tokens([values[i][3] for i in range(len(values))],pad_idx=0)]       # masking
 
     return myfunc
 
@@ -51,6 +52,7 @@ def map_pos_to_bpe(model, batch): #model = roberta model
     src_raw = []
     tag_raw = []
     new_trg = []
+    mask = []
     for i,s in enumerate(batch.src):
         sl = len(batch.src[i].split())
         tl = len(batch.trg[i].split())
@@ -64,16 +66,23 @@ def map_pos_to_bpe(model, batch): #model = roberta model
 
         bpe_srci = bpe_srci.split()
         bpe_trgi = ""
+        mask_trg = []
         k = 0
         for j in range(0,len(bpe_srci)):
             if not bpe_srci[j].endswith("@@"):
                 bpe_trgi += trgi[k] + " "
+                mask_trg.append(1)
                 k += 1
             else:
                 bpe_trgi += trgi[k] + " "
+                mask_trg.append(0)
 
         new_trg.append(bpe_trgi.strip())
-    return new_trg, src_raw, tag_raw
+
+        #mask_trg  [0,1] keep (1) output of that position or not (0)
+        #for calucating tagging accuracy 
+        mask.append(mask_trg)               
+    return new_trg, src_raw, tag_raw, mask
 
 def _to_tensor(src,label,src_encoder,label_encoder):
     return src_encoder(src), label_encoder(label)
@@ -114,29 +123,48 @@ class MultiTaskTaggingModule(pl.LightningModule):
             self.log('train_loss', loss.item(),prog_bar=True)
 
             #Calcuate Accuracy
-            batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
-            batch_prediction = batch_prediction.squeeze(-1)
+            #batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
+            #batch_prediction = batch_prediction.squeeze(-1)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
         loss = torch.tensor([0.0]).sum()
         if True:
-            predictions, _, _ = self.model.forward(val_batch[0])
+            predictions, _, _ = self.model.forward(val_batch[0][:,0:500])
         
             #Calcuate Loss
             trg = val_batch[1]
             predictions = predictions.view(-1, predictions.shape[-1])
-            tags = trg.view(-1).long()
+            tags = trg[:,0:500].reshape((-1,)).long()
             loss = self.criterion(predictions, tags)
             self.log('val_loss', loss.item())
-            #Calcuate Accuracy
+            #Calculate Accuracy
             batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
-            batch_prediction = batch_prediction.squeeze(-1)
+            batch_prediction = batch_prediction.squeeze(-1).cpu()
+
+            actual = tags.cpu()
+            mask = val_batch[3][:,0:500].reshape((-1,))
+
             loss_item = loss.item()
-        return loss_item
 
+            acc = batch_prediction == actual 
+            acc = acc * mask.cpu()
 
+            correct = acc.sum().item()
+            all = mask.sum().item()
 
+        return {'loss' : loss_item, 'pred' : batch_prediction, 
+                'actual' : trg, 'correct' : correct, 'all' : all}
+
+    def validation_epoch_end(self, val_step_outputs):
+        correct = 0
+        all = 0
+        for out in val_step_outputs:
+            correct += out["correct"]
+            all += out["all"]
+
+        acc = correct / all * 100
+        self.log("val_acc",acc)
 
 @register_task("multitask-tagging")
 class MultiTaskTagging(Task):
@@ -145,7 +173,8 @@ class MultiTaskTagging(Task):
     def add_args(parser):
         """Add model-specific arguments to the parser."""
         parser.add_argument('--traindata',type=str, default="./raw_data", help='datapath')
-        
+        parser.add_argument('--valid-interval',type=int, default="500", help='validation interval')
+        parser.add_argument('--sample', action="store_true")
         return parser
 
     def __init__(self,args):
@@ -154,6 +183,8 @@ class MultiTaskTagging(Task):
 
     def setup_task(self, args, parser):
     
+        self.loadall = not args.sample
+
         #Setup Dictionary and Pad Index
         pos_dict, ne_dict, sent_dict = load_dictionaries(args.traindata)
         self.pad_idx = pos_dict.pad_index
@@ -195,7 +226,7 @@ class MultiTaskTagging(Task):
         #Setup Trainer
         ic("Loading trainer ...")
         checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_loss',
-                        save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:.3f}")
+                        save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:.3f}-{val_acc:.3f}")
 
         earlystop_callback = EarlyStopping(monitor='val_loss', patience=8, mode='min', check_on_train_epoch_end=False,verbose=True)
 
@@ -203,8 +234,8 @@ class MultiTaskTagging(Task):
         #callbacks = []
         
         self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainPosData,validPosData)
-        self.trainer = pl.Trainer(gpus=[0], val_check_interval=30, reload_dataloaders_every_n_epochs=1,
-        callbacks=callbacks)
+        self.trainer = pl.Trainer(gpus=[0], val_check_interval=args.valid_interval, 
+        reload_dataloaders_every_n_epochs=1,callbacks=callbacks)
 
         return None
 
@@ -217,13 +248,19 @@ class MultiTaskTagging(Task):
         srcBPETensor = []
         trgBPETensor = []
         trgORITensor = []
+        mskBPETensor = []
 
         srcDict = self.model.bert.task.source_dictionary
         for idx,batch in enumerate(data):
             if idx % 100 == 0:
                 ic(idx)
 
-            trgBPEList, srcBPEList, trgORIList = map_pos_to_bpe(self.model.bert,batch)
+            if not self.loadall:
+                if idx == 500:
+                    break
+
+            trgBPEList, srcBPEList, trgORIList, mskBPEList = map_pos_to_bpe(self.model.bert,batch)
+            #ic(mskBPEList)
             
             srcBPETensor.extend([srcDict.encode_line(lineT, append_eos=False, add_if_not_exist=False) for lineT in srcBPEList])
 
@@ -231,7 +268,9 @@ class MultiTaskTagging(Task):
 
             trgORITensor.extend([label_encoder(lineT, append_eos=False, add_if_not_exist=False) for lineT in trgORIList])
 
-        return list(zip(srcBPETensor, trgBPETensor, trgORITensor))
+            mskBPETensor.extend([torch.tensor(msk,dtype=torch.int32) for msk in mskBPEList])
+
+        return list(zip(srcBPETensor, trgBPETensor, trgORITensor,mskBPETensor))
     
     def train(self):
         self.trainer.fit(self.plmodel)
