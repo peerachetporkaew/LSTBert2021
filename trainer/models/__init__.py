@@ -10,11 +10,11 @@ def register_model(name):
     return register_model_cls
 
 
-def build_model(parser,name):
+def build_model(parser,name,**kwargs):
     if name in MODEL_LIST:
         MODEL_LIST[name].add_args(parser)
         args, _ = parser.parse_known_args()
-        model = MODEL_LIST[name](args)
+        model = MODEL_LIST[name](args,**kwargs)
         return model
     else:
         raise ValueError(f"{name} is not in MODEL_LIST.")

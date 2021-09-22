@@ -9,13 +9,13 @@ def get_parser():
     parser.add_argument('--do', default=None,help='select from {train , test or valid }')
     parser.add_argument('--model', type=str, default="multitask-tagger",
                         help='type of model') # single task, multitask
-    parser.add_argument('--pretrained', default=None,
+    parser.add_argument('--pretrained', default="lst",
                         help='select from {lst , wangchan, mbert, thaibert }')
 
     #Training Options
     parser.add_argument('--max-epochs', metavar='N', type=int,
                         help='an integer for the maximum train epochs')
-    parser.add_argument('--batch-size', metavar='N', type=int,
+    parser.add_argument('--batch-size', metavar='N', type=int, default=32,
                         help='an integer for the batch size')
     parser.add_argument('--lr', type=float, help='learning rate', default=5e-5)
     

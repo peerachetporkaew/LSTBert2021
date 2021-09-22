@@ -1,5 +1,5 @@
 import logging
-logging.basicConfig(encoding='utf-8', level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 from trainer.utils import build_dataloader
 
@@ -35,7 +35,4 @@ if __name__ == "__main__":
     print(args)
 
     task = build_task(args, parser, args.task) # Return task object
-    print(task.datapath)
-    print(task.posdata)
-    
-    print("HELLO")
+    task.train()
