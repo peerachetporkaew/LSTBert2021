@@ -6,7 +6,7 @@ def get_parser():
                         help='an integer for the maximum train epochs')
     parser.add_argument('--batch-size', metavar='N', type=int,
                         help='an integer for the batch size')
-    parser.add_argument('--model', type=str, default="multitask",
+    parser.add_argument('--model', type=str, default="multitask-tagger",
                         help='type of model') # single task, multitask
     parser.add_argument('--lr', type=float, help='learning rate', default=5e-5)
     parser.add_argument('--do', default=None,help='select from {train , test or valid }')
