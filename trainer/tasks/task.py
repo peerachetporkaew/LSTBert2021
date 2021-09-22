@@ -5,10 +5,7 @@ class Task(object):
     def __init__(self,args):
         pass
 
-    def get_parser(self,args):
-        return None
-
-    def setup_task(self,args):
+    def setup_task(self,args, parser):
         return None
     
     def train(self,args):
