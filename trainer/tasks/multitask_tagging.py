@@ -102,12 +102,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
         return self.validdata
 
     def training_step(self,train_batch, batch_idx):
-        #self.optimizer.zero_grad()
-
-        #ic(train_batch[0].size())
-        #ic(train_batch[1].size())
         loss = torch.tensor([0.0]).sum()
-
         if True:
             predictions, _, _ = self.model.forward(train_batch[0])
         
@@ -116,13 +111,31 @@ class MultiTaskTaggingModule(pl.LightningModule):
             predictions = predictions.view(-1, predictions.shape[-1])
             tags = trg.view(-1).long()
             loss = self.criterion(predictions, tags)
-            self.log('loss', loss.item(),prog_bar=True)
+            self.log('train_loss', loss.item(),prog_bar=True)
 
             #Calcuate Accuracy
             batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
             batch_prediction = batch_prediction.squeeze(-1)
-
         return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        loss = torch.tensor([0.0]).sum()
+        if True:
+            predictions, _, _ = self.model.forward(val_batch[0])
+        
+            #Calcuate Loss
+            trg = val_batch[1]
+            predictions = predictions.view(-1, predictions.shape[-1])
+            tags = trg.view(-1).long()
+            loss = self.criterion(predictions, tags)
+            self.log('val_loss', loss.item())
+            #Calcuate Accuracy
+            batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
+            batch_prediction = batch_prediction.squeeze(-1)
+            loss_item = loss.item()
+        return loss_item
+
+
 
 
 @register_task("multitask-tagging")
@@ -181,13 +194,18 @@ class MultiTaskTagging(Task):
 
         #Setup Trainer
         ic("Loading trainer ...")
-        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune', monitor = 'val_loss',
+        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_loss',
                         save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:.3f}")
 
         earlystop_callback = EarlyStopping(monitor='val_loss', patience=8, mode='min', check_on_train_epoch_end=False,verbose=True)
 
+        callbacks = [checkpoint_callback,earlystop_callback]
+        #callbacks = []
+        
         self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainPosData,validPosData)
-        self.trainer = pl.Trainer(gpus=[0], val_check_interval=300, reload_dataloaders_every_n_epochs=1)
+        self.trainer = pl.Trainer(gpus=[0], val_check_interval=30, reload_dataloaders_every_n_epochs=1,
+        callbacks=callbacks)
+
         return None
 
     def convert_to_tensor(self,data, label_encoder):
