@@ -429,7 +429,7 @@ class MultiTaskTagging(Task):
 
         #Setup Trainer
         ic("Loading trainer ...")
-        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_acc', save_top_k=5, mode='max' every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss}-{val_acc:.3f}")
+        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_acc', save_top_k=5, mode='max',every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss}-{val_acc:.3f}")
 
         earlystop_callback = EarlyStopping(monitor='val_acc', patience=8, mode='max', check_on_train_epoch_end=False,verbose=True)
 
