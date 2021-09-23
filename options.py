@@ -19,9 +19,13 @@ def get_parser():
                         help='an integer for the batch size')
     parser.add_argument('--lr', type=float, help='learning rate', default=5e-5)
     
+    parser.add_argument('--gpus', action='store',  type=str, help='GPUs to use', default="0")
+    parser.add_argument('--accelerator', action='store', type=str, help='accelerator for multi-gpu', default=None)
     
     #Checkpoint Options
-    parser.add_argument('--reload-checkpoint', default=None,
+    parser.add_argument('--resume', default=None,
                         help='restore weight from a specified checkpoint')
+
+
 
     return parser

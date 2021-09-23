@@ -368,6 +368,7 @@ class MultiTaskTagging(Task):
         kwargs = {"output_dim" : outdim}
         model = build_model(parser, args.model, **kwargs)
         self.model = model
+
         ic()
         ic(model.dropout)
 
@@ -435,20 +436,20 @@ class MultiTaskTagging(Task):
 
         callbacks = [checkpoint_callback,earlystop_callback]
         #callbacks = []
-        
 
         trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData}
         validDataLoader = [validPosData, validNeData]
-
-
 
         self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainDataLoader,validDataLoader)
         
         self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
         self.plmodel.set_labeldict(taskdict)
         
-        self.trainer = pl.Trainer(gpus=[0], val_check_interval=args.valid_interval, multiple_trainloader_mode="max_size_cycle",
-        reload_dataloaders_every_n_epochs=1,callbacks=callbacks)
+        self.trainer = pl.Trainer(gpus=args.gpus, accelerator=args.accelerator,
+                val_check_interval=args.valid_interval, 
+                multiple_trainloader_mode="max_size_cycle",
+                reload_dataloaders_every_n_epochs=1,callbacks=callbacks,
+                resume_from_checkpoint=args.resume)
 
         return None
 
