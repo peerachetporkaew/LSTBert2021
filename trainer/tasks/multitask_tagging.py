@@ -129,7 +129,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
             #Calcuate Loss
             trg = train_batch[1]
             predictions = predictions.view(-1, predictions.shape[-1])
-            tags = trg.view(-1).long()
+            tags = trg.reshape((-1,)).long()
             loss = self.criterion(predictions, tags)
             batch_loss += loss
             
@@ -141,7 +141,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
             #Calcuate Loss
             trg = train_batch[1]
             predictions = predictions.view(-1, predictions.shape[-1])
-            tags = trg.view(-1).long()
+            tags = trg.reshape((-1,)).long()
             loss = self.criterion(predictions, tags)
             batch_loss += loss
 
@@ -152,7 +152,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
             #Calcuate Loss
             trg = train_batch[1][:,0:MAX_POSITION]
             predictions = predictions.view(-1, predictions.shape[-1])
-            tags = trg.view(-1).long()
+            tags = trg.reshape((-1,)).long()
             loss = self.criterion(predictions, tags)
             batch_loss += loss
 
