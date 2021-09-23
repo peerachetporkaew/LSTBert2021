@@ -8,6 +8,11 @@ def clean_ne(ne):
         return "O"
     return ne.replace("_","-")
 
+def clean_sent_label(sent):
+    if not sent in ["MARK", "PUNC"]:
+        return "O"
+    return sent
+
 def calcuate_ne_f1(EVAL_TRUE,EVAL_PRED):
     """
         EVAL_TRUE : List[List[str]] , size = (all sentences, sentence len)
@@ -25,6 +30,19 @@ def get_pos_accuracy(TRUE,PRED, outfile=None):
         fp.writelines(details + "\n")
         fp.close()
     return acc
+
+def get_sent_accuracy(TRUE,PRED, outfile=None):
+    acc = metrics.f1_score(TRUE,PRED, average='micro')
+    detailsStr = metrics.classification_report(TRUE,PRED, digits=3)
+    print(detailsStr)
+
+    details = metrics.classification_report(TRUE,PRED, digits=3,output_dict = True)
+
+    if outfile is not None:
+        fp = open(outfile,"w")
+        fp.writelines(detailsStr + "\n")
+        fp.close()
+    return details["MARK"]["f1-score"]
 
 def get_ne_accuracy(TRUE,PRED, outfile=None):
 

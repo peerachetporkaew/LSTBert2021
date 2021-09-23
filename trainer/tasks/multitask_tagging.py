@@ -11,14 +11,15 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 import argparse
-
+from seqeval.metrics import classification_report, f1_score
 from fairseq.data.data_utils import collate_tokens
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from ..utils import get_pos_accuracy, get_ne_accuracy, clean_ne
+from ..utils import get_pos_accuracy, get_ne_accuracy 
+from ..utils import clean_ne, get_sent_accuracy, clean_sent_label
 
 MAX_POSITION = 500
 
@@ -144,7 +145,19 @@ class MultiTaskTaggingModule(pl.LightningModule):
             loss = self.criterion(predictions, tags)
             batch_loss += loss
 
+        train_batch = train_batch_dict["s1"]
+        if True: #SENT
+            _, _ , predictions = self.model.forward(train_batch[0][:,0:MAX_POSITION])
+        
+            #Calcuate Loss
+            trg = train_batch[1][:,0:MAX_POSITION]
+            predictions = predictions.view(-1, predictions.shape[-1])
+            tags = trg.view(-1).long()
+            loss = self.criterion(predictions, tags)
+            batch_loss += loss
+
         self.log('train_loss', batch_loss.item(),prog_bar=True)
+
         return batch_loss
 
     def get_pos_batch_loss(self, inputT, labelT, maskT, loss_type="val"): # [batch, len], maskT = BPE mask
@@ -228,6 +241,47 @@ class MultiTaskTaggingModule(pl.LightningModule):
         actualText = "\n".join(actual)
 
         return PRED, TRUE, predText, actualText
+    
+    def get_sent_batch_loss(self, inputT, labelT, maskT, loss_type="val"): # [batch, len], maskT = BPE mask
+        _ , _ , predictions = self.model.forward(inputT)
+        predictions_ = predictions.argmax(dim = -1, keepdim = True)
+        predictions = predictions.view(-1, predictions.shape[-1])
+        tags = labelT
+        loss = self.criterion(predictions, tags.reshape((-1,)).long())
+        loss = loss.sum()
+        self.log(f'{loss_type}_loss', loss.item())
+        return loss, predictions_ #probabilities
+
+    def get_sent_batch_acc(self, inputT, predT, labelT, maskT):
+        batch_prediction = predT #[batch, len]
+        batch_prediction = batch_prediction.squeeze(-1).cpu()
+        batch_prediction = batch_prediction
+
+        actual = labelT.long().cpu()
+        
+        PRED   = []
+        TRUE   = []
+        pred   = []
+        actual = []
+        for m,b,t,i in zip(maskT,batch_prediction,labelT,inputT):
+            temp = []
+            for x,y in zip(m[1:],b[1:]): #Not include <s>
+                if x == 1:
+                    temp.append(clean_sent_label(self.labeldicts["sent"][y.item()]))
+            PRED.extend(temp[0:-1])
+            pred.append(" ".join(temp[0:-1])) #Not include </s>
+
+            temp = []
+            for x,l in zip(m[1:],t[1:]): #Not include <s>
+                if x == 1: 
+                    temp.append(clean_sent_label(self.labeldicts["sent"][l.item()]))
+            TRUE.extend(temp[0:-1])
+            actual.append(" ".join(temp[0:-1])) #Not include </s>
+
+        predText   = "\n".join(pred)
+        actualText = "\n".join(actual)
+
+        return PRED, TRUE, predText, actualText
 
     def validation_step(self, val_batch, batch_idx, valid_idx):
         
@@ -262,6 +316,24 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 loss, predT = self.get_ne_batch_loss(inputT, labelT, maskT, loss_type="ne_val")
                 loss_item = loss.item()
                 PRED, ACTUAL, predStr, actualStr = self.get_ne_batch_acc(inputT, predT, labelT, maskT)
+
+            return {"task" : valid_idx ,  'loss'       : loss_item, "srctext"    : inputText, 
+                    "predText" : predStr, "actualText" : actualStr,
+                    "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
+
+        if valid_idx == 2: #S1
+            pos_batch = val_batch
+            loss = torch.tensor([0.0]).sum()
+            inputText = [" ".join(x.split()) for x in self.srcdict.string(pos_batch[0]).replace("<pad>","").split("\n")]
+            inputText = "\n".join(inputText)
+
+            if True:
+                inputT = pos_batch[0][:,0:MAX_POSITION]
+                labelT = pos_batch[1][:,0:MAX_POSITION]
+                maskT  = pos_batch[3][:,0:MAX_POSITION]
+                loss, predT = self.get_sent_batch_loss(inputT, labelT, maskT, loss_type="ne_val")
+                loss_item = loss.item()
+                PRED, ACTUAL, predStr, actualStr = self.get_sent_batch_acc(inputT, predT, labelT, maskT)
 
             return {"task" : valid_idx ,  'loss'       : loss_item, "srctext"    : inputText, 
                     "predText" : predStr, "actualText" : actualStr,
@@ -303,8 +375,9 @@ class MultiTaskTaggingModule(pl.LightningModule):
         print("POS ACC = %0.3f"%acc)
         SUMACC += acc
 
-        time.sleep(2)
-
+        time.sleep(3)
+        
+        #VALID NE
         val_step_ne_outputs = val_step_outputs[1]
 
         fp = open("out.ne.true.txt","w")
@@ -333,7 +406,39 @@ class MultiTaskTaggingModule(pl.LightningModule):
         print("NE ACC = %0.3f"%acc)
         SUMACC += acc
 
-        time.sleep(1)
+        time.sleep(3)
+
+        #VALID SENT1
+        val_step_ne_outputs = val_step_outputs[2]
+
+        fp = open("out.s1.true.txt","w")
+        fo = open("out.s1.pred.txt","w")
+
+        ACTUAL = []
+        PRED   = []
+
+        for out in val_step_ne_outputs:
+            if out["task"] == 2: #
+                loss_sum += out["loss"]
+                count += 1
+                fp.writelines(out["actualText"] + "\n")
+                fo.writelines(out["predText"] + "\n")
+
+                ACTUAL.extend(out["ACTUAL"])
+                PRED.extend(out["PRED"])
+            else:
+                print("ERROR")
+                exit()
+            
+        fp.close()
+        fo.close()
+
+        acc = get_sent_accuracy(ACTUAL,PRED,outfile="out.s1.acc.txt")
+        print("SENT1 ACC = %0.3f"%acc)
+        SUMACC += acc
+
+        time.sleep(3)
+
         self.log("val_loss", loss_sum / count)
         self.log("val_acc",SUMACC)
 
@@ -383,7 +488,7 @@ class MultiTaskTagging(Task):
         ic("Loading POS dataset ...")
         ic(args.batch_size)
         
-        taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict}
+        taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict, "sent1" : sent_dict, "sent2" : sent_dict}
 
         #LOAD POS Dataset
         dataset = "pos"
@@ -428,17 +533,39 @@ class MultiTaskTagging(Task):
                                   shuffle=False, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
 
+        #LOAD NE Dataset
+        ic("Loading SENT1 dataset ...")
+        dataset = "sent1"
+        trainSetS1 = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
+        trainSetS1_tensor = self.convert_to_tensor(trainSetS1,
+                                                    label_encoder=taskdict[dataset].encode_line)
+        trainS1Data = DataLoader(trainSetS1_tensor, 
+                                  batch_size=args.batch_size, 
+                                  shuffle=True, 
+                                  collate_fn = mycollate_tokens(self.pad_idx))
+
+        validSetS1 = build_data_iterator(args,args.traindata,
+                                          dataset=dataset,type="eval",shuffle=False)
+
+        validSetS1_tensor = self.convert_to_tensor(validSetS1,
+                                                    label_encoder=taskdict[dataset].encode_line)
+        validS1Data = DataLoader(validSetS1_tensor, 
+                                  batch_size=args.batch_size, 
+                                  shuffle=False, 
+                                  collate_fn = mycollate_tokens(self.pad_idx))
+        
+
         #Setup Trainer
         ic("Loading trainer ...")
-        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_acc', save_top_k=5, mode='max',every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss}-{val_acc:.3f}")
+        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_acc', save_top_k=5, mode='max',every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:0.6f}-{val_acc:.3f}")
 
         earlystop_callback = EarlyStopping(monitor='val_acc', patience=8, mode='max', check_on_train_epoch_end=False,verbose=True)
 
         callbacks = [checkpoint_callback,earlystop_callback]
         #callbacks = []
 
-        trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData}
-        validDataLoader = [validPosData, validNeData]
+        trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData, "s1" : trainS1Data}
+        validDataLoader = [validPosData, validNeData, validS1Data]
 
         self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainDataLoader,validDataLoader)
         
@@ -470,7 +597,7 @@ class MultiTaskTagging(Task):
                 ic(idx)
 
             if not self.loadall:
-                if idx == 200:
+                if idx == 50:
                     break
 
             trgBPEList, srcBPEList, trgORIList, mskBPEList = map_pos_to_bpe(self.model.bert,batch)

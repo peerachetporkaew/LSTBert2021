@@ -1,3 +1,3 @@
-python main.py --batch-size 8 --valid-interval 500
+python main.py --batch-size 8 --valid-interval 1200
 
 
