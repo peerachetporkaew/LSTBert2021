@@ -18,6 +18,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
+from ..utils import get_pos_accuracy
+
 def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_beginning=False):
     """Convert a list of 1d tensors into a padded 2d tensor."""
     size = max(v.size(0) for v in values)
@@ -84,9 +86,6 @@ def map_pos_to_bpe(model, batch): #model = roberta model
         mask.append(mask_trg)               
     return new_trg, src_raw, tag_raw, mask
 
-def _to_tensor(src,label,src_encoder,label_encoder):
-    return src_encoder(src), label_encoder(label)
-
 #Pytorch Lightning Trainer 
 
 class MultiTaskTaggingModule(pl.LightningModule):
@@ -100,6 +99,12 @@ class MultiTaskTaggingModule(pl.LightningModule):
         self.criterion = criterion
         self.traindata = traindata
         self.validdata = validdata
+
+    def set_srcdict(self,srcdict):
+        self.srcdict = srcdict
+
+    def set_labeldict(self,labeldicts):
+        self.labeldicts = labeldicts 
 
     def configure_optimizers(self):
         return self.optimizer
@@ -130,43 +135,94 @@ class MultiTaskTaggingModule(pl.LightningModule):
 
     def validation_step(self, val_batch, batch_idx):
         loss = torch.tensor([0.0]).sum()
+        inputText = [" ".join(x.split()) for x in self.srcdict.string(val_batch[0]).replace("<pad>","").split("\n")]
+        inputText = "\n".join(inputText)
+
         if True:
-            predictions, _, _ = self.model.forward(val_batch[0][:,0:500])
+            inputT = val_batch[0][:,0:500]
+            predictions, _, _ = self.model.forward(inputT)
+            predictions_ = predictions.argmax(dim = -1, keepdim = True)
+
             #_, predictions, _ = self.model.forward(val_batch[0][:,0:500])
             
             #Calcuate Loss
             trg = val_batch[1]
             predictions = predictions.view(-1, predictions.shape[-1])
-            tags = trg[:,0:500].reshape((-1,)).long()
-            loss = self.criterion(predictions, tags)
+            tags = trg[:,0:500]
+            
+            loss = self.criterion(predictions, tags.reshape((-1,)).long())
             self.log('val_loss', loss.item())
-            #Calculate Accuracy
-            batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
-            batch_prediction = batch_prediction.squeeze(-1).cpu()
 
-            actual = tags.cpu()
-            mask = val_batch[3][:,0:500].reshape((-1,))
+            #Calculate Accuracy
+            mask = val_batch[3][:,0:500]
+            batch_prediction = predictions_ #[batch, len]
+            batch_prediction = batch_prediction.squeeze(-1).cpu()
+            batch_prediction = batch_prediction
+
+            actual = tags.long().cpu()
+            #ic(mask,batch_prediction,actual) #batch x len
+
+            PRED = []
+            TRUE = []
+            out  = []
+            true = []
+            for m,b,t,i in zip(mask,batch_prediction,tags,inputT):
+                temp = []
+                for x,y in zip(m[1:],b[1:]): #Not include <s>
+                    if x == 1:
+                        temp.append(self.labeldicts["pos"][y.item()])
+                PRED.extend(temp[0:-1])
+                out.append(" ".join(temp[0:-1])) #Not include </s>
+
+                temp = []
+                for x,l in zip(m[1:],t[1:]): #Not include <s>
+                    if x == 1: 
+                        temp.append(self.labeldicts["pos"][l.item()])
+                TRUE.extend(temp[0:-1])
+                true.append(" ".join(temp[0:-1])) #Not include </s>
+
+            outputText = "\n".join(out)
+            trueText   = "\n".join(true)
 
             loss_item = loss.item()
 
             acc = batch_prediction == actual 
             acc = acc * mask.cpu()
 
-            correct = acc.sum().item()
-            all = mask.sum().item()
+            correct = acc.reshape((-1,)).sum().item()
+            all = mask.reshape((-1,)).sum().item()
 
         return {'loss' : loss_item, 'pred' : batch_prediction, 
-                'actual' : trg, 'correct' : correct, 'all' : all}
+                'actual' : trg, 'correct' : correct, 'all' : all, 
+                "srctext" : inputText, "outtext" : outputText, "truetext" : trueText,
+                "TRUE" : TRUE, "PRED" : PRED}
 
     def validation_epoch_end(self, val_step_outputs):
         correct = 0
         all = 0
+        fp = open("out.pos.true.txt","w")
+        fo = open("out.pos.pred.txt","w")
+
+        TRUE = []
+        PRED = []
+
         for out in val_step_outputs:
             correct += out["correct"]
             all += out["all"]
+            fp.writelines(out["truetext"] + "\n")
+            fo.writelines(out["outtext"] + "\n")
 
-        acc = correct / all * 100
+            TRUE.extend(out["TRUE"])
+            PRED.extend(out["PRED"])
+        
+        fp.close()
+        fo.close()
+
+        acc = get_pos_accuracy(TRUE,PRED)
+        print("ACC = %0.3f"%acc)
+        time.sleep(3)
         self.log("val_acc",acc)
+
 
 @register_task("multitask-tagging")
 class MultiTaskTagging(Task):
@@ -222,7 +278,9 @@ class MultiTaskTagging(Task):
                                   shuffle=True, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type="eval")
+        validSetpos = build_data_iterator(args,args.traindata,
+                                          dataset=dataset,type="eval",shuffle=False)
+
         validSetPos_tensor = self.convert_to_tensor(validSetpos,
                                                     label_encoder=taskdict[dataset].encode_line)
         validPosData = DataLoader(validSetPos_tensor, 
@@ -240,6 +298,10 @@ class MultiTaskTagging(Task):
         #callbacks = []
         
         self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainPosData,validPosData)
+        
+        self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
+        self.plmodel.set_labeldict(taskdict)
+        
         self.trainer = pl.Trainer(gpus=[0], val_check_interval=args.valid_interval, 
         reload_dataloaders_every_n_epochs=1,callbacks=callbacks)
 
@@ -262,7 +324,7 @@ class MultiTaskTagging(Task):
                 ic(idx)
 
             if not self.loadall:
-                if idx == 500:
+                if idx == 200:
                     break
 
             trgBPEList, srcBPEList, trgORIList, mskBPEList = map_pos_to_bpe(self.model.bert,batch)

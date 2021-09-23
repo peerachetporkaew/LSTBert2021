@@ -3,7 +3,7 @@ BERT For Sequential Tagging
 
 # Change Log
 
-- v0.1 Add POS Taggin Task
+- v0.1 Add POS Tagging Task
 
 
 # Dataset

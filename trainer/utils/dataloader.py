@@ -9,7 +9,7 @@ from torchtext import data
 from torchtext import datasets
 
 
-def build_data_iterator(args,path,dataset="pos",type="train"):
+def build_data_iterator(args,path,dataset="pos",type="train",shuffle=False):
     BATCH_SIZE = args.batch_size
     path = Path.cwd() / path
 
@@ -19,8 +19,12 @@ def build_data_iterator(args,path,dataset="pos",type="train"):
     mt_train = datasets.TranslationDataset(
         path= str(path / f'./lst20-{dataset}/{dataset}.{type}'), exts=('.th', '.label'),
         fields=(src, trg))
-    train_iter = data.BucketIterator(mt_train,sort=True, sort_within_batch=False, 
-                                     batch_size=BATCH_SIZE, device='cpu', shuffle=True,sort_key=lambda x: len(x.src))
+    if shuffle:
+        train_iter = data.BucketIterator(mt_train,sort=True, sort_within_batch=False, 
+                                        batch_size=BATCH_SIZE, device='cpu', shuffle=shuffle,sort_key=lambda x: len(x.src))
+    else:
+        train_iter = data.BucketIterator(mt_train,sort=False, sort_within_batch=False, 
+                                        batch_size=BATCH_SIZE, device='cpu', shuffle=shuffle)
     return iter(train_iter)
 
 def load_dictionaries(path):
