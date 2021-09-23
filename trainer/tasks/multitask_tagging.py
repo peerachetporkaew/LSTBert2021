@@ -38,7 +38,7 @@ def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_be
 
     for i, v in enumerate(values):
         copy_tensor(v, res[i][size - len(v):] if left_pad else res[i][:len(v)])
-    return res
+    return res.long()
 
 def mycollate_tokens(pad_index):
 
