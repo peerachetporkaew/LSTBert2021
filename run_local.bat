@@ -1,2 +1,2 @@
-python main.py --batch-size 8 --sample --valid-interval 50
+python main.py --batch-size 8 --sample --valid-interval 500
 

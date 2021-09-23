@@ -18,7 +18,9 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from ..utils import get_pos_accuracy
+from ..utils import get_pos_accuracy, get_ne_accuracy, clean_ne
+
+MAX_POSITION = 500
 
 def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_beginning=False):
     """Convert a list of 1d tensors into a padded 2d tensor."""
@@ -115,113 +117,225 @@ class MultiTaskTaggingModule(pl.LightningModule):
     def val_dataloader(self):
         return self.validdata
 
-    def training_step(self,train_batch, batch_idx):
-        loss = torch.tensor([0.0]).sum()
-        if True:
+    def training_step(self,train_batch_dict, batch_idx):
+        #print(train_batch.keys())
+        batch_loss = 0.0
+
+        train_batch = train_batch_dict["pos"]
+        if True: #POS
             predictions, _, _ = self.model.forward(train_batch[0])
-            #_, predictions, _ = self.model.forward(train_batch[0])
         
             #Calcuate Loss
             trg = train_batch[1]
             predictions = predictions.view(-1, predictions.shape[-1])
             tags = trg.view(-1).long()
             loss = self.criterion(predictions, tags)
-            self.log('train_loss', loss.item(),prog_bar=True)
-
-            #Calcuate Accuracy
-            #batch_prediction = predictions.argmax(dim = -1, keepdim = True) #[batch, len]
-            #batch_prediction = batch_prediction.squeeze(-1)
-        return loss
-
-    def validation_step(self, val_batch, batch_idx):
-        loss = torch.tensor([0.0]).sum()
-        inputText = [" ".join(x.split()) for x in self.srcdict.string(val_batch[0]).replace("<pad>","").split("\n")]
-        inputText = "\n".join(inputText)
-
-        if True:
-            inputT = val_batch[0][:,0:500]
-            predictions, _, _ = self.model.forward(inputT)
-            predictions_ = predictions.argmax(dim = -1, keepdim = True)
-
-            #_, predictions, _ = self.model.forward(val_batch[0][:,0:500])
+            batch_loss += loss
             
+
+        train_batch = train_batch_dict["ne"]
+        if True: #NE
+            _, predictions, _ = self.model.forward(train_batch[0])
+        
             #Calcuate Loss
-            trg = val_batch[1]
+            trg = train_batch[1]
             predictions = predictions.view(-1, predictions.shape[-1])
-            tags = trg[:,0:500]
-            
-            loss = self.criterion(predictions, tags.reshape((-1,)).long())
-            self.log('val_loss', loss.item())
+            tags = trg.view(-1).long()
+            loss = self.criterion(predictions, tags)
+            batch_loss += loss
 
-            #Calculate Accuracy
-            mask = val_batch[3][:,0:500]
-            batch_prediction = predictions_ #[batch, len]
-            batch_prediction = batch_prediction.squeeze(-1).cpu()
-            batch_prediction = batch_prediction
+        self.log('train_loss', batch_loss.item(),prog_bar=True)
+        return batch_loss
 
-            actual = tags.long().cpu()
-            #ic(mask,batch_prediction,actual) #batch x len
+    def get_pos_batch_loss(self, inputT, labelT, maskT, loss_type="val"): # [batch, len], maskT = BPE mask
+        predictions, _, _ = self.model.forward(inputT)
+        predictions_ = predictions.argmax(dim = -1, keepdim = True)
+        predictions = predictions.view(-1, predictions.shape[-1])
+        tags = labelT
+        loss = self.criterion(predictions, tags.reshape((-1,)).long())
+        loss = loss.sum()
+        self.log(f'{loss_type}_loss', loss.item())
+        return loss, predictions_ #probabilities
 
-            PRED = []
-            TRUE = []
-            out  = []
-            true = []
-            for m,b,t,i in zip(mask,batch_prediction,tags,inputT):
-                temp = []
-                for x,y in zip(m[1:],b[1:]): #Not include <s>
-                    if x == 1:
-                        temp.append(self.labeldicts["pos"][y.item()])
-                PRED.extend(temp[0:-1])
-                out.append(" ".join(temp[0:-1])) #Not include </s>
+    def get_pos_batch_acc(self, inputT, predT, labelT, maskT):
+        batch_prediction = predT #[batch, len]
+        batch_prediction = batch_prediction.squeeze(-1).cpu()
+        batch_prediction = batch_prediction
 
-                temp = []
-                for x,l in zip(m[1:],t[1:]): #Not include <s>
-                    if x == 1: 
-                        temp.append(self.labeldicts["pos"][l.item()])
-                TRUE.extend(temp[0:-1])
-                true.append(" ".join(temp[0:-1])) #Not include </s>
+        actual = labelT.long().cpu()
+        
+        PRED   = []
+        TRUE   = []
+        pred   = []
+        actual = []
+        for m,b,t,i in zip(maskT,batch_prediction,labelT,inputT):
+            temp = []
+            for x,y in zip(m[1:],b[1:]): #Not include <s>
+                if x == 1:
+                    temp.append(self.labeldicts["pos"][y.item()])
+            PRED.extend(temp[0:-1])
+            pred.append(" ".join(temp[0:-1])) #Not include </s>
 
-            outputText = "\n".join(out)
-            trueText   = "\n".join(true)
+            temp = []
+            for x,l in zip(m[1:],t[1:]): #Not include <s>
+                if x == 1: 
+                    temp.append(self.labeldicts["pos"][l.item()])
+            TRUE.extend(temp[0:-1])
+            actual.append(" ".join(temp[0:-1])) #Not include </s>
 
-            loss_item = loss.item()
+        predText   = "\n".join(pred)
+        actualText = "\n".join(actual)
 
-            acc = batch_prediction == actual 
-            acc = acc * mask.cpu()
+        return PRED, TRUE, predText, actualText
+    
+    def get_ne_batch_loss(self, inputT, labelT, maskT, loss_type="val"): # [batch, len], maskT = BPE mask
+        _ , predictions, _ = self.model.forward(inputT)
+        predictions_ = predictions.argmax(dim = -1, keepdim = True)
+        predictions = predictions.view(-1, predictions.shape[-1])
+        tags = labelT
+        loss = self.criterion(predictions, tags.reshape((-1,)).long())
+        loss = loss.sum()
+        self.log(f'{loss_type}_loss', loss.item())
+        return loss, predictions_ #probabilities
 
-            correct = acc.reshape((-1,)).sum().item()
-            all = mask.reshape((-1,)).sum().item()
+    def get_ne_batch_acc(self, inputT, predT, labelT, maskT):
+        batch_prediction = predT #[batch, len]
+        batch_prediction = batch_prediction.squeeze(-1).cpu()
+        batch_prediction = batch_prediction
 
-        return {'loss' : loss_item, 'pred' : batch_prediction, 
-                'actual' : trg, 'correct' : correct, 'all' : all, 
-                "srctext" : inputText, "outtext" : outputText, "truetext" : trueText,
-                "TRUE" : TRUE, "PRED" : PRED}
+        actual = labelT.long().cpu()
+        
+        PRED   = []
+        TRUE   = []
+        pred   = []
+        actual = []
+        for m,b,t,i in zip(maskT,batch_prediction,labelT,inputT):
+            temp = []
+            for x,y in zip(m[1:],b[1:]): #Not include <s>
+                if x == 1:
+                    temp.append(clean_ne(self.labeldicts["ne"][y.item()]))
+            PRED.extend(temp[0:-1])
+            pred.append(" ".join(temp[0:-1])) #Not include </s>
+
+            temp = []
+            for x,l in zip(m[1:],t[1:]): #Not include <s>
+                if x == 1: 
+                    temp.append(clean_ne(self.labeldicts["ne"][l.item()]))
+            TRUE.extend(temp[0:-1])
+            actual.append(" ".join(temp[0:-1])) #Not include </s>
+
+        predText   = "\n".join(pred)
+        actualText = "\n".join(actual)
+
+        return PRED, TRUE, predText, actualText
+
+    def validation_step(self, val_batch, batch_idx, valid_idx):
+        
+        if valid_idx == 0: #POS
+            pos_batch = val_batch
+            loss = torch.tensor([0.0]).sum()
+            inputText = [" ".join(x.split()) for x in self.srcdict.string(pos_batch[0]).replace("<pad>","").split("\n")]
+            inputText = "\n".join(inputText)
+
+            if True:
+                inputT = pos_batch[0][:,0:MAX_POSITION]
+                labelT = pos_batch[1][:,0:MAX_POSITION]
+                maskT  = pos_batch[3][:,0:MAX_POSITION]
+                loss, predT = self.get_pos_batch_loss(inputT, labelT, maskT, loss_type="pos_val")
+                loss_item = loss.item()
+                PRED, ACTUAL, predStr, actualStr = self.get_pos_batch_acc(inputT, predT, labelT, maskT)
+
+            return {"task" : valid_idx ,  'loss'       : loss_item, "srctext"    : inputText, 
+                    "predText" : predStr, "actualText" : actualStr,
+                    "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
+
+        if valid_idx == 1: #NE
+            pos_batch = val_batch
+            loss = torch.tensor([0.0]).sum()
+            inputText = [" ".join(x.split()) for x in self.srcdict.string(pos_batch[0]).replace("<pad>","").split("\n")]
+            inputText = "\n".join(inputText)
+
+            if True:
+                inputT = pos_batch[0][:,0:MAX_POSITION]
+                labelT = pos_batch[1][:,0:MAX_POSITION]
+                maskT  = pos_batch[3][:,0:MAX_POSITION]
+                loss, predT = self.get_ne_batch_loss(inputT, labelT, maskT, loss_type="ne_val")
+                loss_item = loss.item()
+                PRED, ACTUAL, predStr, actualStr = self.get_ne_batch_acc(inputT, predT, labelT, maskT)
+
+            return {"task" : valid_idx ,  'loss'       : loss_item, "srctext"    : inputText, 
+                    "predText" : predStr, "actualText" : actualStr,
+                    "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
 
     def validation_epoch_end(self, val_step_outputs):
-        correct = 0
-        all = 0
+    
+
+        SUMACC = 0.0
+        val_step_pos_outputs = val_step_outputs[0]
+
         fp = open("out.pos.true.txt","w")
         fo = open("out.pos.pred.txt","w")
 
-        TRUE = []
-        PRED = []
+        ACTUAL = []
+        PRED   = []
 
-        for out in val_step_outputs:
-            correct += out["correct"]
-            all += out["all"]
-            fp.writelines(out["truetext"] + "\n")
-            fo.writelines(out["outtext"] + "\n")
+        count = 0
+        loss_sum = 0.0
 
-            TRUE.extend(out["TRUE"])
-            PRED.extend(out["PRED"])
-        
+        for out in val_step_pos_outputs:
+            if out["task"] == 0: #POS
+                loss_sum += out["loss"]
+                count += 1
+                fp.writelines(out["actualText"] + "\n")
+                fo.writelines(out["predText"] + "\n")
+
+                ACTUAL.extend(out["ACTUAL"])
+                PRED.extend(out["PRED"])
+            else:
+                print("ERROR")
+                exit()
+
+            
         fp.close()
         fo.close()
 
-        acc = get_pos_accuracy(TRUE,PRED)
-        print("ACC = %0.3f"%acc)
-        time.sleep(3)
-        self.log("val_acc",acc)
+        acc = get_pos_accuracy(ACTUAL,PRED)
+        print("POS ACC = %0.3f"%acc)
+        SUMACC += acc
+
+        time.sleep(2)
+
+        val_step_ne_outputs = val_step_outputs[1]
+
+        fp = open("out.ne.true.txt","w")
+        fo = open("out.ne.pred.txt","w")
+
+        ACTUAL = []
+        PRED   = []
+
+        for out in val_step_ne_outputs:
+            if out["task"] == 1: #NE
+                loss_sum += out["loss"]
+                count += 1
+                fp.writelines(out["actualText"] + "\n")
+                fo.writelines(out["predText"] + "\n")
+
+                ACTUAL.append(out["ACTUAL"])
+                PRED.append(out["PRED"])
+            else:
+                print("ERROR")
+                exit()
+            
+        fp.close()
+        fo.close()
+
+        acc = get_ne_accuracy(ACTUAL,PRED)
+        print("NE ACC = %0.3f"%acc)
+        SUMACC += acc
+
+        time.sleep(1)
+        self.log("val_loss", loss_sum / count)
+        self.log("val_acc",SUMACC)
 
 
 @register_task("multitask-tagging")
@@ -245,6 +359,8 @@ class MultiTaskTagging(Task):
 
         #Setup Dictionary and Pad Index
         pos_dict, ne_dict, sent_dict = load_dictionaries(args.traindata)
+
+
         self.pad_idx = pos_dict.pad_index
         outdim = [len(pos_dict.symbols), len(ne_dict.symbols), len(sent_dict.symbols) ]
 
@@ -265,10 +381,11 @@ class MultiTaskTagging(Task):
         #Setup Dataset
         ic("Loading POS dataset ...")
         ic(args.batch_size)
-
-        dataset = "pos"
-        #dataset = "ne"
+        
         taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict}
+
+        #LOAD POS Dataset
+        dataset = "pos"
 
         trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
         trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
@@ -288,21 +405,49 @@ class MultiTaskTagging(Task):
                                   shuffle=False, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
 
+        
+        #LOAD NE Dataset
+        ic("Loading NE dataset ...")
+        dataset = "ne"
+        trainSetne = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
+        trainSetne_tensor = self.convert_to_tensor(trainSetne,
+                                                    label_encoder=taskdict[dataset].encode_line)
+        trainNeData = DataLoader(trainSetne_tensor, 
+                                  batch_size=args.batch_size, 
+                                  shuffle=True, 
+                                  collate_fn = mycollate_tokens(self.pad_idx))
+
+        validSetne = build_data_iterator(args,args.traindata,
+                                          dataset=dataset,type="eval",shuffle=False)
+
+        validSetNe_tensor = self.convert_to_tensor(validSetne,
+                                                    label_encoder=taskdict[dataset].encode_line)
+        validNeData = DataLoader(validSetNe_tensor, 
+                                  batch_size=args.batch_size, 
+                                  shuffle=False, 
+                                  collate_fn = mycollate_tokens(self.pad_idx))
+
         #Setup Trainer
         ic("Loading trainer ...")
-        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_loss', save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:.3f}-{val_acc:.3f}")
+        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/', monitor = 'val_acc', save_top_k=5, every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss}-{val_acc:.3f}")
 
         earlystop_callback = EarlyStopping(monitor='val_loss', patience=8, mode='min', check_on_train_epoch_end=False,verbose=True)
 
         callbacks = [checkpoint_callback,earlystop_callback]
         #callbacks = []
         
-        self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainPosData,validPosData)
+
+        trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData}
+        validDataLoader = [validPosData, validNeData]
+
+
+
+        self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainDataLoader,validDataLoader)
         
         self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
         self.plmodel.set_labeldict(taskdict)
         
-        self.trainer = pl.Trainer(gpus=[0], val_check_interval=args.valid_interval, 
+        self.trainer = pl.Trainer(gpus=[0], val_check_interval=args.valid_interval, multiple_trainloader_mode="max_size_cycle",
         reload_dataloaders_every_n_epochs=1,callbacks=callbacks)
 
         return None
