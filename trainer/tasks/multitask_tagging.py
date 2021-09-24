@@ -154,7 +154,18 @@ class MultiTaskTaggingModule(pl.LightningModule):
             predictions = predictions.view(-1, predictions.shape[-1])
             tags = trg.reshape((-1,)).long()
             loss = self.criterion(predictions, tags)
-            batch_loss += loss
+            batch_loss += loss*0.5
+
+        train_batch = train_batch_dict["s2"]
+        if True: #SENT
+            _, _ , predictions = self.model.forward(train_batch[0][:,0:MAX_POSITION])
+        
+            #Calcuate Loss
+            trg = train_batch[1][:,0:MAX_POSITION]
+            predictions = predictions.view(-1, predictions.shape[-1])
+            tags = trg.reshape((-1,)).long()
+            loss = self.criterion(predictions, tags)
+            batch_loss += loss*0.5
 
         self.log('train_loss', batch_loss.item(),prog_bar=True)
 
@@ -338,6 +349,24 @@ class MultiTaskTaggingModule(pl.LightningModule):
             return {"task" : valid_idx ,  'loss'       : loss_item, "srctext"    : inputText, 
                     "predText" : predStr, "actualText" : actualStr,
                     "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
+        
+        if valid_idx == 3: #S2
+            pos_batch = val_batch
+            loss = torch.tensor([0.0]).sum()
+            inputText = [" ".join(x.split()) for x in self.srcdict.string(pos_batch[0]).replace("<pad>","").split("\n")]
+            inputText = "\n".join(inputText)
+
+            if True:
+                inputT = pos_batch[0][:,0:MAX_POSITION]
+                labelT = pos_batch[1][:,0:MAX_POSITION]
+                maskT  = pos_batch[3][:,0:MAX_POSITION]
+                loss, predT = self.get_sent_batch_loss(inputT, labelT, maskT, loss_type="ne_val")
+                loss_item = loss.item()
+                PRED, ACTUAL, predStr, actualStr = self.get_sent_batch_acc(inputT, predT, labelT, maskT)
+
+            return {"task" : valid_idx ,  'loss'       : loss_item, "srctext"    : inputText, 
+                    "predText" : predStr, "actualText" : actualStr,
+                    "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
 
     def validation_epoch_end(self, val_step_outputs):
     
@@ -439,6 +468,37 @@ class MultiTaskTaggingModule(pl.LightningModule):
 
         time.sleep(3)
 
+        #VALID SENT2
+        val_step_ne_outputs = val_step_outputs[3]
+
+        fp = open("out.s2.true.txt","w")
+        fo = open("out.s2.pred.txt","w")
+
+        ACTUAL = []
+        PRED   = []
+
+        for out in val_step_ne_outputs:
+            if out["task"] == 3: #
+                loss_sum += out["loss"]
+                count += 1
+                fp.writelines(out["actualText"] + "\n")
+                fo.writelines(out["predText"] + "\n")
+
+                ACTUAL.extend(out["ACTUAL"])
+                PRED.extend(out["PRED"])
+            else:
+                print("ERROR")
+                exit()
+            
+        fp.close()
+        fo.close()
+
+        acc = get_sent_accuracy(ACTUAL,PRED,outfile="out.s2.acc.txt")
+        print("SENT2 ACC = %0.3f"%acc)
+        SUMACC += acc
+
+        time.sleep(3)
+
         self.log("val_loss", loss_sum / count)
         self.log("val_acc",SUMACC)
 
@@ -533,7 +593,7 @@ class MultiTaskTagging(Task):
                                   shuffle=False, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
 
-        #LOAD NE Dataset
+        #LOAD SENT1 Dataset
         ic("Loading SENT1 dataset ...")
         dataset = "sent1"
         trainSetS1 = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
@@ -554,6 +614,27 @@ class MultiTaskTagging(Task):
                                   shuffle=False, 
                                   collate_fn = mycollate_tokens(self.pad_idx))
         
+        #LOAD SENT1 Dataset
+        ic("Loading SENT2 dataset ...")
+        dataset = "sent2"
+        trainSetS2 = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
+        trainSetS2_tensor = self.convert_to_tensor(trainSetS2,
+                                                    label_encoder=taskdict[dataset].encode_line)
+        trainS2Data = DataLoader(trainSetS2_tensor, 
+                                  batch_size=args.batch_size, 
+                                  shuffle=True, 
+                                  collate_fn = mycollate_tokens(self.pad_idx))
+
+        validSetS2 = build_data_iterator(args,args.traindata,
+                                          dataset=dataset,type="eval",shuffle=False)
+
+        validSetS2_tensor = self.convert_to_tensor(validSetS2,
+                                                    label_encoder=taskdict[dataset].encode_line)
+        validS2Data = DataLoader(validSetS2_tensor, 
+                                  batch_size=args.batch_size, 
+                                  shuffle=False, 
+                                  collate_fn = mycollate_tokens(self.pad_idx))
+        
 
         #Setup Trainer
         ic("Loading trainer ...")
@@ -564,8 +645,8 @@ class MultiTaskTagging(Task):
         callbacks = [checkpoint_callback,earlystop_callback]
         #callbacks = []
 
-        trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData, "s1" : trainS1Data}
-        validDataLoader = [validPosData, validNeData, validS1Data]
+        trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData, "s1" : trainS1Data, "s2" : trainS2Data}
+        validDataLoader = [validPosData, validNeData, validS1Data, validS2Data]
 
         self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainDataLoader,validDataLoader)
         
