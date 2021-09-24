@@ -1,3 +1,3 @@
-python main.py --batch-size 4 --valid-interval 1000
+python main.py --batch-size 4 --valid-interval 50 --feature-layer 3 --checkpoint-dir ./feature_3/
 
 

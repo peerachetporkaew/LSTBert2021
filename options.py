@@ -25,6 +25,7 @@ def get_parser():
     #Checkpoint Options
     parser.add_argument('--resume', default=None,
                         help='restore weight from a specified checkpoint')
+    parser.add_argument('--checkpoint-dir', default="/./", help="checkpoint subfolder")
 
 
 

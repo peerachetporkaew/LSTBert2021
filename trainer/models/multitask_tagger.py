@@ -29,14 +29,15 @@ class MultiTaskTagger(nn.Module):
         """Add model-specific arguments to the parser."""
         parser.add_argument('--dropout',type=float, default=0.1, help='fc layer dropout')
         parser.add_argument('--outputdim',type=str, default="10,10,10",  help='list of output dim separated by a comma (,)')
+        parser.add_argument('--feature-layer', type=int, default=-1,help='select feature layer (default : -1)')
+
 
         return parser
 
     def __init__(self,args, output_dim = None):
         super().__init__()
-
-        self.fc = nn.Linear(10,10)
-
+        self.args = args
+       
         self.encoder = self.load_pretrained(args.pretrained)
         self.bert = self.encoder
 
@@ -63,7 +64,7 @@ class MultiTaskTagger(nn.Module):
         """
         
         all_layers = self.bert.extract_features(token_batch, return_all_hiddens=True)
-        last_layer = all_layers[-1]
+        last_layer = all_layers[self.args.feature_layer]
         #ic("ALL Layer size",all_layers[-1].size())
 
         embedded = last_layer
