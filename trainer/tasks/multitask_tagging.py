@@ -764,7 +764,7 @@ class MultiTaskTagging(Task):
             self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
             self.plmodel.set_labeldict(taskdict)
 
-            self.plmodel.load_from_checkpoint(checkpoint_path=args.resume,model=self.model)
+            self.plmodel.load_from_checkpoint(checkpoint_path=args.resume,model=self.model,strict=False)
 
             self.trainer = pl.Trainer(gpus=args.gpus, 
                     resume_from_checkpoint=args.resume)

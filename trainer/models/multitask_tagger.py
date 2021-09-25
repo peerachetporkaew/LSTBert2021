@@ -1,4 +1,4 @@
-from ..utils import build_dataloader
+from utils import build_dataloader
 from . import register_model
 
 import torch.nn as nn
