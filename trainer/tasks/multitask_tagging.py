@@ -94,7 +94,7 @@ def map_pos_to_bpe(model, batch): #model = roberta model
 
 class MultiTaskTaggingModule(pl.LightningModule):
 
-    def __init__(self, model, optimizer, criterion=None, traindata = None, validdata = None):
+    def __init__(self, model, optimizer=None, criterion=None, traindata = None, validdata = None):
         super().__init__()
         self.automatic_optimization = True
 
@@ -110,12 +110,13 @@ class MultiTaskTaggingModule(pl.LightningModule):
         #Save Hyperparameters
         self.save_hyperparameters(self.args)
         hparams = vars(self.args)
-        
-        os.makedirs("./checkpoints/lstfinetune/" + self.args.checkpoint_dir, exist_ok=True)
-        fp = open("./checkpoints/lstfinetune/" + self.args.checkpoint_dir + "/config.josn","w")
-        fp.writelines(json.dumps(hparams,indent=2))
-        fp.close()
-        ic("Saved Hyperparameters !")
+
+        if self.args.do == "train":
+            os.makedirs("./checkpoints/lstfinetune/" + self.args.checkpoint_dir, exist_ok=True)
+            fp = open("./checkpoints/lstfinetune/" + self.args.checkpoint_dir + "/config.josn","w")
+            fp.writelines(json.dumps(hparams,indent=2))
+            fp.close()
+            ic("Saved Hyperparameters !")
 
 
     def set_srcdict(self,srcdict):
@@ -517,6 +518,57 @@ class MultiTaskTaggingModule(pl.LightningModule):
         self.log("val_loss", loss_sum / count)
         self.log("val_acc",SUMACC)
 
+    def test_step(self,test_batch, batch_idx):
+
+        pos_batch = test_batch
+        inputT = pos_batch[0]
+        labelT = pos_batch[1]
+        maskT  = pos_batch[3]
+        predictions, _, _ = self.model.forward(inputT)
+        predictions_ = predictions.argmax(dim = -1, keepdim = True)
+        predT = predictions_
+        PRED, ACTUAL, predStr, actualStr = self.get_pos_batch_acc(inputT, predT, labelT, maskT)
+
+        return { "task" : 0,
+            "predText" : predStr, "actualText" : actualStr,
+            "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
+
+
+
+    def test_epoch_end(self,test_step_outputs):
+
+        SUMACC = 0.0
+        val_step_pos_outputs = test_step_outputs
+
+        fp = open("out.pos.true.txt","w")
+        fo = open("out.pos.pred.txt","w")
+
+        ACTUAL = []
+        PRED   = []
+
+        for out in val_step_pos_outputs:
+            if out["task"] == 0: #POS
+                fp.writelines(out["actualText"] + "\n")
+                fo.writelines(out["predText"] + "\n")
+
+                ACTUAL.extend(out["ACTUAL"])
+                PRED.extend(out["PRED"])
+            else:
+                print("ERROR")
+                exit()
+
+            
+        fp.close()
+        fo.close()
+
+        acc = get_pos_accuracy(ACTUAL,PRED)
+        print("POS ACC = %0.3f"%acc)
+        SUMACC += acc
+
+        time.sleep(3)
+        return acc
+
+
 
 @register_task("multitask-tagging")
 class MultiTaskTagging(Task):
@@ -534,12 +586,15 @@ class MultiTaskTagging(Task):
         pass
 
     def setup_task(self, args, parser):
-    
+        self.args = args
         self.loadall = not args.sample
 
         #Setup Dictionary and Pad Index
         pos_dict, ne_dict, sent_dict = load_dictionaries(args.traindata)
+        taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict, "sent1" : sent_dict, "sent2" : sent_dict}
 
+        
+        self.taskdict = taskdict
 
         self.pad_idx = pos_dict.pad_index
         outdim = [len(pos_dict.symbols), len(ne_dict.symbols), len(sent_dict.symbols) ]
@@ -552,128 +607,141 @@ class MultiTaskTagging(Task):
         ic()
         ic(model.dropout)
 
-        #Setup Criterion
-        criterion = nn.CrossEntropyLoss(ignore_index = self.pad_index)
+        if args.do == "train":
+                
 
-        #Setup Optimizer
-        LEARNING_RATE = args.lr
-        optimizer = optim.Adam(model.parameters(), lr = LEARNING_RATE,betas=(0.9, 0.98), eps=1e-9)
+            #Setup Criterion
+            criterion = nn.CrossEntropyLoss(ignore_index = self.pad_index)
 
-        #Setup Dataset
-        ic("Loading POS dataset ...")
-        ic(args.batch_size)
-        
-        taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict, "sent1" : sent_dict, "sent2" : sent_dict}
+            #Setup Optimizer
+            LEARNING_RATE = args.lr
+            optimizer = optim.Adam(model.parameters(), lr = LEARNING_RATE,betas=(0.9, 0.98), eps=1e-9)
 
-        #LOAD POS Dataset
-        dataset = "pos"
+            #Setup Dataset
+            ic("Loading POS dataset ...")
+            ic(args.batch_size)
+            
+            taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict, "sent1" : sent_dict, "sent2" : sent_dict}
 
-        trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
-        trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        trainPosData = DataLoader(trainSetPos_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=True, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
+            #LOAD POS Dataset
+            dataset = "pos"
 
-        validSetpos = build_data_iterator(args,args.traindata,
-                                          dataset=dataset,type="eval",shuffle=False)
+            trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
+            trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainPosData = DataLoader(trainSetPos_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetPos_tensor = self.convert_to_tensor(validSetpos,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        validPosData = DataLoader(validSetPos_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=False, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
+            validSetpos = build_data_iterator(args,args.traindata,
+                                            dataset=dataset,type="eval",shuffle=False)
 
-        
-        #LOAD NE Dataset
-        ic("Loading NE dataset ...")
-        dataset = "ne"
-        trainSetne = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
-        trainSetne_tensor = self.convert_to_tensor(trainSetne,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        trainNeData = DataLoader(trainSetne_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=True, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
+            validSetPos_tensor = self.convert_to_tensor(validSetpos,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            validPosData = DataLoader(validSetPos_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=False, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetne = build_data_iterator(args,args.traindata,
-                                          dataset=dataset,type="eval",shuffle=False)
+            
+            #LOAD NE Dataset
+            ic("Loading NE dataset ...")
+            dataset = "ne"
+            trainSetne = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
+            trainSetne_tensor = self.convert_to_tensor(trainSetne,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainNeData = DataLoader(trainSetne_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetNe_tensor = self.convert_to_tensor(validSetne,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        validNeData = DataLoader(validSetNe_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=False, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
+            validSetne = build_data_iterator(args,args.traindata,
+                                            dataset=dataset,type="eval",shuffle=False)
 
-        #LOAD SENT1 Dataset
-        ic("Loading SENT1 dataset ...")
-        dataset = "sent1"
-        trainSetS1 = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
-        trainSetS1_tensor = self.convert_to_tensor(trainSetS1,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        trainS1Data = DataLoader(trainSetS1_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=True, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
+            validSetNe_tensor = self.convert_to_tensor(validSetne,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            validNeData = DataLoader(validSetNe_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=False, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetS1 = build_data_iterator(args,args.traindata,
-                                          dataset=dataset,type="eval",shuffle=False)
+            #LOAD SENT1 Dataset
+            ic("Loading SENT1 dataset ...")
+            dataset = "sent1"
+            trainSetS1 = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
+            trainSetS1_tensor = self.convert_to_tensor(trainSetS1,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainS1Data = DataLoader(trainSetS1_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetS1_tensor = self.convert_to_tensor(validSetS1,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        validS1Data = DataLoader(validSetS1_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=False, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
-        
-        #LOAD SENT1 Dataset
-        ic("Loading SENT2 dataset ...")
-        dataset = "sent2"
-        trainSetS2 = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
-        trainSetS2_tensor = self.convert_to_tensor(trainSetS2,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        trainS2Data = DataLoader(trainSetS2_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=True, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
+            validSetS1 = build_data_iterator(args,args.traindata,
+                                            dataset=dataset,type="eval",shuffle=False)
 
-        validSetS2 = build_data_iterator(args,args.traindata,
-                                          dataset=dataset,type="eval",shuffle=False)
+            validSetS1_tensor = self.convert_to_tensor(validSetS1,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            validS1Data = DataLoader(validSetS1_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=False, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
+            
+            #LOAD SENT1 Dataset
+            ic("Loading SENT2 dataset ...")
+            dataset = "sent2"
+            trainSetS2 = build_data_iterator(args,args.traindata,dataset=dataset,type="train")
+            trainSetS2_tensor = self.convert_to_tensor(trainSetS2,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainS2Data = DataLoader(trainSetS2_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
 
-        validSetS2_tensor = self.convert_to_tensor(validSetS2,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        validS2Data = DataLoader(validSetS2_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=False, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
-        
+            validSetS2 = build_data_iterator(args,args.traindata,
+                                            dataset=dataset,type="eval",shuffle=False)
 
-        #Setup Trainer
-        ic("Loading trainer ...")
-        checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/' + args.checkpoint_dir, monitor = 'val_acc', save_top_k=5, mode='max',every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:0.5f}-{val_acc:.3f}")
+            validSetS2_tensor = self.convert_to_tensor(validSetS2,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            validS2Data = DataLoader(validSetS2_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=False, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
+            
 
-        earlystop_callback = EarlyStopping(monitor='val_acc', patience=8, mode='max', check_on_train_epoch_end=False,verbose=True)
+            #Setup Trainer
+            ic("Loading trainer ...")
+            checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/' + args.checkpoint_dir, monitor = 'val_acc', save_top_k=5, mode='max',every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:0.5f}-{val_acc:.3f}")
 
-        callbacks = [checkpoint_callback,earlystop_callback]
-        #callbacks = []
+            earlystop_callback = EarlyStopping(monitor='val_acc', patience=8, mode='max', check_on_train_epoch_end=False,verbose=True)
 
-        trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData, "s1" : trainS1Data, "s2" : trainS2Data}
-        validDataLoader = [validPosData, validNeData, validS1Data, validS2Data]
+            callbacks = [checkpoint_callback,earlystop_callback]
+            #callbacks = []
 
-        self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainDataLoader,validDataLoader)
-        
-        self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
-        self.plmodel.set_labeldict(taskdict)
-        
-        self.trainer = pl.Trainer(gpus=args.gpus, accelerator=args.accelerator,
-                val_check_interval=args.valid_interval, 
-                multiple_trainloader_mode="max_size_cycle",
-                reload_dataloaders_every_n_epochs=1,callbacks=callbacks,
-                resume_from_checkpoint=args.resume)
+            trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData, "s1" : trainS1Data, "s2" : trainS2Data}
+            validDataLoader = [validPosData, validNeData, validS1Data, validS2Data]
 
+            self.plmodel = MultiTaskTaggingModule(model, optimizer,criterion,trainDataLoader,validDataLoader)
+            
+            self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
+            self.plmodel.set_labeldict(taskdict)
+            
+            self.trainer = pl.Trainer(gpus=args.gpus, accelerator=args.accelerator,
+                    val_check_interval=args.valid_interval, 
+                    multiple_trainloader_mode="max_size_cycle",
+                    reload_dataloaders_every_n_epochs=1,callbacks=callbacks,
+                    resume_from_checkpoint=args.resume)
+        else:
+            taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict, "sent1" : sent_dict, "sent2" : sent_dict}
+            self.plmodel = MultiTaskTaggingModule(model)
+            self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
+            self.plmodel.set_labeldict(taskdict)
+
+            self.plmodel.load_from_checkpoint(checkpoint_path=args.resume,model=self.model)
+
+            self.trainer = pl.Trainer(gpus=args.gpus, 
+                    resume_from_checkpoint=args.resume)
+            
         return None
 
     def convert_to_tensor(self,data, label_encoder):
@@ -713,5 +781,26 @@ class MultiTaskTagging(Task):
         self.trainer.fit(self.plmodel)
         return 
 
-    def evaluate(self,args, dataset="valid"):
+    def evaluate(self, subset="test"):
+        args = self.args
+        self.loadall = not args.sample
+
+        taskdict = self.taskdict
+        outdim = [len(taskdict["pos"].symbols), len(taskdict["ne"].symbols), len(taskdict["sent"].symbols) ]
+
+        #Load Dataset
+        #LOAD POS Dataset
+        dataset = "pos"
+
+        trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type=subset)
+        trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
+                                                    label_encoder=taskdict[dataset].encode_line)
+        trainPosData = DataLoader(trainSetPos_tensor, 
+                                  batch_size=args.batch_size, 
+                                  shuffle=True, 
+                                  collate_fn = mycollate_tokens(self.pad_idx))
+
+        trainer = self.trainer
+        trainer.test(self.plmodel, test_dataloaders=trainPosData)
+
         pass

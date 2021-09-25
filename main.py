@@ -35,4 +35,7 @@ if __name__ == "__main__":
     print(args)
 
     task = build_task(args, parser, args.task) # Return task object
-    task.train()
+    if args.do == "train":
+        task.train()
+    elif args.do == "test":
+        task.evaluate()

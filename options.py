@@ -6,7 +6,7 @@ def get_parser():
     #Task and Model Options
     parser.add_argument('--task', type=str, default="multitask-tagging",
                         help='select from {multitask-tagging, tagging}')
-    parser.add_argument('--do', default=None,help='select from {train , test or valid }')
+    parser.add_argument('--do', default="train",help='select from {train , test or valid }')
     parser.add_argument('--model', type=str, default="multitask-tagger",
                         help='type of model') # single task, multitask
     parser.add_argument('--pretrained', default="lst",
