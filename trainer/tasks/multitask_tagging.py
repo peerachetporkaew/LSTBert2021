@@ -518,54 +518,61 @@ class MultiTaskTaggingModule(pl.LightningModule):
         self.log("val_loss", loss_sum / count)
         self.log("val_acc",SUMACC)
 
+    def set_test_task(self,task="pos"):
+        self.test_task = task 
+
     def test_step(self,test_batch, batch_idx):
 
-        pos_batch = test_batch
-        inputT = pos_batch[0]
-        labelT = pos_batch[1]
-        maskT  = pos_batch[3]
-        predictions, _, _ = self.model.forward(inputT)
-        predictions_ = predictions.argmax(dim = -1, keepdim = True)
-        predT = predictions_
-        PRED, ACTUAL, predStr, actualStr = self.get_pos_batch_acc(inputT, predT, labelT, maskT)
+        if self.test_task == "pos":
+            pos_batch = test_batch
+            inputT = pos_batch[0]
+            labelT = pos_batch[1]
+            maskT  = pos_batch[3]
+            predictions, _, _ = self.model.forward(inputT)
+            predictions_ = predictions.argmax(dim = -1, keepdim = True)
+            predT = predictions_
+            PRED, ACTUAL, predStr, actualStr = self.get_pos_batch_acc(inputT, predT, labelT, maskT)
 
-        return { "task" : 0,
-            "predText" : predStr, "actualText" : actualStr,
-            "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
+            return { "task" : 0,
+                "predText" : predStr, "actualText" : actualStr,
+                "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
+        
+        if self.test_task == "ne":
+            pos_batch = test_batch
+            inputT = pos_batch[0]
+            labelT = pos_batch[1]
+            maskT  = pos_batch[3]
+            _ , predictions, _ = self.model.forward(inputT)
+            predictions_ = predictions.argmax(dim = -1, keepdim = True)
+            predT = predictions_
+            PRED, ACTUAL, predStr, actualStr = self.get_ne_batch_acc(inputT, predT, labelT, maskT)
+
+            return { "task" : 0,
+                "predText" : predStr, "actualText" : actualStr,
+                "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
 
 
 
     def test_epoch_end(self,test_step_outputs):
-
-        SUMACC = 0.0
-        val_step_pos_outputs = test_step_outputs
-
-        #fp = open("out.pos.true.txt","w")
-        #fo = open("out.pos.pred.txt","w")
-
+        acc = 0         
         ACTUAL = []
         PRED   = []
-
-        for out in val_step_pos_outputs:
-            if out["task"] == 0: #POS
-                #fp.writelines(out["actualText"] + "\n")
-                #fo.writelines(out["predText"] + "\n")
-
+        
+            
+        if self.test_task == "pos":
+            for out in test_step_outputs:
                 ACTUAL.extend(out["ACTUAL"])
                 PRED.extend(out["PRED"])
-            else:
-                print("ERROR")
-                exit()
+            acc = get_pos_accuracy(ACTUAL,PRED)
+            print("POS ACC = %0.3f"%acc)
 
-            
-        #fp.close()
-        #fo.close()
+        if self.test_task == "ne":
+            for out in test_step_outputs:
+                ACTUAL.append(out["ACTUAL"])
+                PRED.append(out["PRED"])
+            acc = get_ne_accuracy(ACTUAL,PRED)
+            print("NE ACC = %0.3f"%acc)
 
-        acc = get_pos_accuracy(ACTUAL,PRED)
-        print("POS ACC = %0.3f"%acc)
-        SUMACC += acc
-
-        time.sleep(3)
         return acc
 
 
@@ -717,8 +724,7 @@ class MultiTaskTagging(Task):
             earlystop_callback = EarlyStopping(monitor='val_acc', patience=5, mode='max', check_on_train_epoch_end=False,verbose=True)
 
             callbacks = [checkpoint_callback,earlystop_callback]
-            #callbacks = []
-
+  
             trainDataLoader = {"pos" : trainPosData, "ne" : trainNeData, "s1" : trainS1Data, "s2" : trainS2Data}
             validDataLoader = [validPosData, validNeData, validS1Data, validS2Data]
 
@@ -732,7 +738,8 @@ class MultiTaskTagging(Task):
                     multiple_trainloader_mode="max_size_cycle",
                     reload_dataloaders_every_n_epochs=1,callbacks=callbacks,
                     resume_from_checkpoint=args.resume)
-        else:
+
+        elif args.do == "test":
             taskdict = {"pos" : pos_dict , "ne" : ne_dict, "sent" : sent_dict, "sent1" : sent_dict, "sent2" : sent_dict}
             self.plmodel = MultiTaskTaggingModule(model)
             self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
@@ -742,6 +749,8 @@ class MultiTaskTagging(Task):
 
             self.trainer = pl.Trainer(gpus=args.gpus, 
                     resume_from_checkpoint=args.resume)
+        else:
+            print("Error args.do should be 'train' or 'test.")
             
         return None
 
@@ -795,17 +804,35 @@ class MultiTaskTagging(Task):
 
         #Load Dataset
         #LOAD POS Dataset
-        dataset = "pos"
+        if False:
+            dataset = "pos"
+            self.plmodel.set_test_task("pos")
 
-        trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type=subset)
-        trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
-                                                    label_encoder=taskdict[dataset].encode_line)
-        trainPosData = DataLoader(trainSetPos_tensor, 
-                                  batch_size=args.batch_size, 
-                                  shuffle=True, 
-                                  collate_fn = mycollate_tokens(self.pad_idx))
+            trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type=subset)
+            trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainPosData = DataLoader(trainSetPos_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
 
-        trainer = self.trainer
-        trainer.test(self.plmodel, test_dataloaders=trainPosData)
+            trainer = self.trainer
+            trainer.test(self.plmodel, test_dataloaders=trainPosData)
 
-        pass
+        #Test NER
+        if True:
+            dataset = "ne"
+            self.plmodel.set_test_task("ne")
+
+            trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type=subset)
+            trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainPosData = DataLoader(trainSetPos_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
+
+            trainer = self.trainer
+            trainer.test(self.plmodel, test_dataloaders=trainPosData)
+
+        return None
