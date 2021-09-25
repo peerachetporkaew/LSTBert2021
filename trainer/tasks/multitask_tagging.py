@@ -390,8 +390,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
         SUMACC = 0.0
         val_step_pos_outputs = val_step_outputs[0]
 
-        fp = open("out.pos.true.txt","w")
-        fo = open("out.pos.pred.txt","w")
+        #fp = open("out.pos.true.txt","w")
+        #fo = open("out.pos.pred.txt","w")
 
         ACTUAL = []
         PRED   = []
@@ -403,8 +403,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
             if out["task"] == 0: #POS
                 loss_sum += out["loss"]
                 count += 1
-                fp.writelines(out["actualText"] + "\n")
-                fo.writelines(out["predText"] + "\n")
+                #fp.writelines(out["actualText"] + "\n")
+                #fo.writelines(out["predText"] + "\n")
 
                 ACTUAL.extend(out["ACTUAL"])
                 PRED.extend(out["PRED"])
@@ -413,8 +413,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 exit()
 
             
-        fp.close()
-        fo.close()
+        #fp.close()
+        #fo.close()
 
         acc = get_pos_accuracy(ACTUAL,PRED)
         print("POS ACC = %0.3f"%acc)
@@ -425,8 +425,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
         #VALID NE
         val_step_ne_outputs = val_step_outputs[1]
 
-        fp = open("out.ne.true.txt","w")
-        fo = open("out.ne.pred.txt","w")
+        #fp = open("out.ne.true.txt","w")
+        #fo = open("out.ne.pred.txt","w")
 
         ACTUAL = []
         PRED   = []
@@ -435,8 +435,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
             if out["task"] == 1: #NE
                 loss_sum += out["loss"]
                 count += 1
-                fp.writelines(out["actualText"] + "\n")
-                fo.writelines(out["predText"] + "\n")
+                #fp.writelines(out["actualText"] + "\n")
+                #fo.writelines(out["predText"] + "\n")
 
                 ACTUAL.append(out["ACTUAL"])
                 PRED.append(out["PRED"])
@@ -444,8 +444,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 print("ERROR")
                 exit()
             
-        fp.close()
-        fo.close()
+        #fp.close()
+        #fo.close()
 
         acc = get_ne_accuracy(ACTUAL,PRED)
         print("NE ACC = %0.3f"%acc)
@@ -456,8 +456,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
         #VALID SENT1
         val_step_ne_outputs = val_step_outputs[2]
 
-        fp = open("out.s1.true.txt","w")
-        fo = open("out.s1.pred.txt","w")
+        #fp = open("out.s1.true.txt","w")
+        #fo = open("out.s1.pred.txt","w")
 
         ACTUAL = []
         PRED   = []
@@ -466,8 +466,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
             if out["task"] == 2: #
                 loss_sum += out["loss"]
                 count += 1
-                fp.writelines(out["actualText"] + "\n")
-                fo.writelines(out["predText"] + "\n")
+                #fp.writelines(out["actualText"] + "\n")
+                #fo.writelines(out["predText"] + "\n")
 
                 ACTUAL.extend(out["ACTUAL"])
                 PRED.extend(out["PRED"])
@@ -475,8 +475,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 print("ERROR")
                 exit()
             
-        fp.close()
-        fo.close()
+        #fp.close()
+        #fo.close()
 
         acc = get_sent_accuracy(ACTUAL,PRED,outfile="out.s1.acc.txt")
         print("SENT1 ACC = %0.3f"%acc)
@@ -487,8 +487,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
         #VALID SENT2
         val_step_ne_outputs = val_step_outputs[3]
 
-        fp = open("out.s2.true.txt","w")
-        fo = open("out.s2.pred.txt","w")
+        #fp = open("out.s2.true.txt","w")
+        #fo = open("out.s2.pred.txt","w")
 
         ACTUAL = []
         PRED   = []
@@ -497,8 +497,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
             if out["task"] == 3: #
                 loss_sum += out["loss"]
                 count += 1
-                fp.writelines(out["actualText"] + "\n")
-                fo.writelines(out["predText"] + "\n")
+                #fp.writelines(out["actualText"] + "\n")
+                #fo.writelines(out["predText"] + "\n")
 
                 ACTUAL.extend(out["ACTUAL"])
                 PRED.extend(out["PRED"])
@@ -506,8 +506,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 print("ERROR")
                 exit()
             
-        fp.close()
-        fo.close()
+        #fp.close()
+        #fo.close()
 
         acc = get_sent_accuracy(ACTUAL,PRED,outfile="out.s2.acc.txt")
         print("SENT2 ACC = %0.3f"%acc)
@@ -540,16 +540,16 @@ class MultiTaskTaggingModule(pl.LightningModule):
         SUMACC = 0.0
         val_step_pos_outputs = test_step_outputs
 
-        fp = open("out.pos.true.txt","w")
-        fo = open("out.pos.pred.txt","w")
+        #fp = open("out.pos.true.txt","w")
+        #fo = open("out.pos.pred.txt","w")
 
         ACTUAL = []
         PRED   = []
 
         for out in val_step_pos_outputs:
             if out["task"] == 0: #POS
-                fp.writelines(out["actualText"] + "\n")
-                fo.writelines(out["predText"] + "\n")
+                #fp.writelines(out["actualText"] + "\n")
+                #fo.writelines(out["predText"] + "\n")
 
                 ACTUAL.extend(out["ACTUAL"])
                 PRED.extend(out["PRED"])
@@ -558,8 +558,8 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 exit()
 
             
-        fp.close()
-        fo.close()
+        #fp.close()
+        #fo.close()
 
         acc = get_pos_accuracy(ACTUAL,PRED)
         print("POS ACC = %0.3f"%acc)
@@ -578,6 +578,7 @@ class MultiTaskTagging(Task):
         """Add model-specific arguments to the parser."""
         parser.add_argument('--traindata',type=str, default="./raw_data", help='datapath')
         parser.add_argument('--valid-interval',type=int, default="500", help='validation interval')
+        parser.add_argument('--testsubset',type=str, default="test", help='test subset (select from ["eval","test"])')
         parser.add_argument('--sample', action="store_true")
         return parser
 
@@ -713,7 +714,7 @@ class MultiTaskTagging(Task):
             ic("Loading trainer ...")
             checkpoint_callback = ModelCheckpoint(dirpath='./checkpoints/lstfinetune/' + args.checkpoint_dir, monitor = 'val_acc', save_top_k=5, mode='max',every_n_val_epochs=1, filename="{epoch}-{step}-{val_loss:0.5f}-{val_acc:.3f}")
 
-            earlystop_callback = EarlyStopping(monitor='val_acc', patience=8, mode='max', check_on_train_epoch_end=False,verbose=True)
+            earlystop_callback = EarlyStopping(monitor='val_acc', patience=5, mode='max', check_on_train_epoch_end=False,verbose=True)
 
             callbacks = [checkpoint_callback,earlystop_callback]
             #callbacks = []
@@ -781,8 +782,12 @@ class MultiTaskTagging(Task):
         self.trainer.fit(self.plmodel)
         return 
 
-    def evaluate(self, subset="test"):
+    def evaluate(self, subset=None):
         args = self.args
+
+        if subset is None:
+            subset = args.testsubset
+
         self.loadall = not args.sample
 
         taskdict = self.taskdict
