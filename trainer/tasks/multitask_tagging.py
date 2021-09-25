@@ -4,6 +4,7 @@ from ..models import build_model
 from ..utils import build_dataloader, build_data_iterator, load_dictionaries
 from pathlib import Path
 
+import os, json
 import time
 import torch
 import torch.nn as nn
@@ -98,10 +99,24 @@ class MultiTaskTaggingModule(pl.LightningModule):
         self.automatic_optimization = True
 
         self.model = model
+        self.args = self.model.args
+
+
         self.optimizer = optimizer
         self.criterion = criterion
         self.traindata = traindata
         self.validdata = validdata
+
+        #Save Hyperparameters
+        self.save_hyperparameters(self.args)
+        hparams = vars(self.args)
+        
+        os.makedirs("./checkpoints/lstfinetune/" + self.args.checkpoint_dir, exist_ok=True)
+        fp = open("./checkpoints/lstfinetune/" + self.args.checkpoint_dir + "/config.josn","w")
+        fp.writelines(json.dumps(hparams,indent=2))
+        fp.close()
+        ic("Saved Hyperparameters !")
+
 
     def set_srcdict(self,srcdict):
         self.srcdict = srcdict
@@ -342,7 +357,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 inputT = pos_batch[0][:,0:MAX_POSITION]
                 labelT = pos_batch[1][:,0:MAX_POSITION]
                 maskT  = pos_batch[3][:,0:MAX_POSITION]
-                loss, predT = self.get_sent_batch_loss(inputT, labelT, maskT, loss_type="ne_val")
+                loss, predT = self.get_sent_batch_loss(inputT, labelT, maskT, loss_type="s1_val")
                 loss_item = loss.item()
                 PRED, ACTUAL, predStr, actualStr = self.get_sent_batch_acc(inputT, predT, labelT, maskT)
 
@@ -360,7 +375,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 inputT = pos_batch[0][:,0:MAX_POSITION]
                 labelT = pos_batch[1][:,0:MAX_POSITION]
                 maskT  = pos_batch[3][:,0:MAX_POSITION]
-                loss, predT = self.get_sent_batch_loss(inputT, labelT, maskT, loss_type="ne_val")
+                loss, predT = self.get_sent_batch_loss(inputT, labelT, maskT, loss_type="s2_val")
                 loss_item = loss.item()
                 PRED, ACTUAL, predStr, actualStr = self.get_sent_batch_acc(inputT, predT, labelT, maskT)
 
