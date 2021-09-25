@@ -39,3 +39,5 @@ if __name__ == "__main__":
         task.train()
     elif args.do == "test":
         task.evaluate()
+    elif args.do == "load":
+        task.evaluate()

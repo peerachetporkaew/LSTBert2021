@@ -551,6 +551,20 @@ class MultiTaskTaggingModule(pl.LightningModule):
                 "predText" : predStr, "actualText" : actualStr,
                 "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
 
+        if self.test_task == "sent1" or self.test_task == "sent2":
+            pos_batch = test_batch
+            inputT = pos_batch[0]
+            labelT = pos_batch[1]
+            maskT  = pos_batch[3]
+            _ , _, predictions = self.model.forward(inputT)
+            predictions_ = predictions.argmax(dim = -1, keepdim = True)
+            predT = predictions_
+            PRED, ACTUAL, predStr, actualStr = self.get_sent_batch_acc(inputT, predT, labelT, maskT)
+
+            return { "task" : 0,
+                "predText" : predStr, "actualText" : actualStr,
+                "ACTUAL"   : ACTUAL,  "PRED"       : PRED }
+
 
 
     def test_epoch_end(self,test_step_outputs):
@@ -558,7 +572,6 @@ class MultiTaskTaggingModule(pl.LightningModule):
         ACTUAL = []
         PRED   = []
         
-            
         if self.test_task == "pos":
             for out in test_step_outputs:
                 ACTUAL.extend(out["ACTUAL"])
@@ -573,9 +586,14 @@ class MultiTaskTaggingModule(pl.LightningModule):
             acc = get_ne_accuracy(ACTUAL,PRED)
             print("NE ACC = %0.3f"%acc)
 
+        if self.test_task == "sent1" or self.test_task == "sent2":
+            for out in test_step_outputs:
+                ACTUAL.extend(out["ACTUAL"])
+                PRED.extend(out["PRED"])
+            acc = get_sent_accuracy(ACTUAL,PRED)
+            print("SENT ACC = %0.3f"%acc)
+
         return acc
-
-
 
 @register_task("multitask-tagging")
 class MultiTaskTagging(Task):
@@ -587,6 +605,7 @@ class MultiTaskTagging(Task):
         parser.add_argument('--valid-interval',type=int, default="500", help='validation interval')
         parser.add_argument('--testsubset',type=str, default="test", help='test subset (select from ["eval","test"])')
         parser.add_argument('--sample', action="store_true")
+        parser.add_argument('--save-location',type=str, default="./model.pt", help='model output path')
         return parser
 
     def __init__(self,args):
@@ -749,6 +768,23 @@ class MultiTaskTagging(Task):
 
             self.trainer = pl.Trainer(gpus=args.gpus, 
                     resume_from_checkpoint=args.resume)
+
+        elif args.do == "save":
+            self.plmodel = MultiTaskTaggingModule(model)
+            self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
+            self.plmodel.set_labeldict(taskdict)
+            self.plmodel.load_from_checkpoint(checkpoint_path=args.resume,model=self.model)
+            torch.save(self.model.state_dict(), self.args.save_location)
+            ic("Model Saved !")
+
+        elif args.do == "load":
+            model.load_state_dict(torch.load(args.save_location))
+
+            self.plmodel = MultiTaskTaggingModule(model)
+            self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
+            self.plmodel.set_labeldict(taskdict)
+            self.trainer = pl.Trainer(gpus=args.gpus)
+
         else:
             print("Error args.do should be 'train' or 'test.")
             
@@ -804,7 +840,8 @@ class MultiTaskTagging(Task):
 
         #Load Dataset
         #LOAD POS Dataset
-        if False:
+        if True:
+            ic("POS Dataset")
             dataset = "pos"
             self.plmodel.set_test_task("pos")
 
@@ -817,10 +854,11 @@ class MultiTaskTagging(Task):
                                     collate_fn = mycollate_tokens(self.pad_idx))
 
             trainer = self.trainer
-            trainer.test(self.plmodel, test_dataloaders=trainPosData)
+            trainer.test(self.plmodel, dataloaders=trainPosData)
 
         #Test NER
         if True:
+            ic("NE Dataset")
             dataset = "ne"
             self.plmodel.set_test_task("ne")
 
@@ -833,6 +871,38 @@ class MultiTaskTagging(Task):
                                     collate_fn = mycollate_tokens(self.pad_idx))
 
             trainer = self.trainer
-            trainer.test(self.plmodel, test_dataloaders=trainPosData)
+            trainer.test(self.plmodel, dataloaders=trainPosData)
+
+        if True:
+            ic("Sent 1 Dataset")
+            dataset = "sent1"
+            self.plmodel.set_test_task("sent1")
+
+            trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type=subset)
+            trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainPosData = DataLoader(trainSetPos_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
+
+            trainer = self.trainer
+            trainer.test(self.plmodel, dataloaders=trainPosData)
+        
+        if True:
+            ic("Sent 2 Dataset")
+            dataset = "sent2"
+            self.plmodel.set_test_task("sent1")
+
+            trainSetpos = build_data_iterator(args,args.traindata,dataset=dataset,type=subset)
+            trainSetPos_tensor = self.convert_to_tensor(trainSetpos,
+                                                        label_encoder=taskdict[dataset].encode_line)
+            trainPosData = DataLoader(trainSetPos_tensor, 
+                                    batch_size=args.batch_size, 
+                                    shuffle=True, 
+                                    collate_fn = mycollate_tokens(self.pad_idx))
+
+            trainer = self.trainer
+            trainer.test(self.plmodel, dataloaders=trainPosData)
 
         return None
