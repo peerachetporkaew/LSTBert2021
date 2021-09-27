@@ -1,7 +1,9 @@
 from ..utils import build_dataloader
 from . import register_model
 
+import time
 import torch.nn as nn
+from torch.nn import ModuleList
 import torch
 
 from fairseq.data.dictionary import Dictionary
@@ -53,10 +55,22 @@ class MultiTaskTagger(nn.Module):
         if pretrained == "lst":
             roberta = RobertaModel.from_pretrained('./checkpoints/lstbertbest/', checkpoint_file='checkpoint_best.pt',bpe="subword_nmt", bpe_codes="./checkpoints/lstbertbest/th_18M.50000.bpe",data_name_or_path=".:")
 
-            #init_all(roberta,init_funcs)
+            if self.args.do == "count":
+                """Trim roberta layer"""
+                layers = roberta.model.decoder.sentence_encoder.layers
+                ic(len(layers)) 
+                roberta.model.decoder.sentence_encoder.layers = ModuleList([l for l in layers[0:self.args.feature_layer]])
+                time.sleep(10)
+                
 
             return roberta
-        return None
+
+        if pretrained == "none":
+            roberta = RobertaModel.from_pretrained('./checkpoints/lstbertbest/', checkpoint_file='checkpoint_best.pt',bpe="subword_nmt", bpe_codes="./checkpoints/lstbertbest/th_18M.50000.bpe",data_name_or_path=".:")
+            init_all(roberta,init_funcs)
+            return roberta
+            
+        return 
 
     def forward(self, token_batch):
         """

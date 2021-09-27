@@ -8,6 +8,8 @@ import os, json
 import time
 import torch
 import torch.nn as nn
+
+import numpy as np
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
@@ -784,6 +786,11 @@ class MultiTaskTagging(Task):
             self.plmodel.set_srcdict(self.model.bert.task.source_dictionary)
             self.plmodel.set_labeldict(taskdict)
             self.trainer = pl.Trainer(gpus=args.gpus)
+
+        elif args.do == "count":
+            model_parameters = filter(lambda p: p.requires_grad, self.model.parameters())
+            params = sum([np.prod(p.size()) for p in model_parameters])
+            ic("Numbers of parameter : ",params)
 
         else:
             print("Error args.do should be 'train' or 'test.")
