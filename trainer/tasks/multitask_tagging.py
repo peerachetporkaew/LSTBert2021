@@ -527,9 +527,9 @@ class MultiTaskTaggingModule(pl.LightningModule):
 
         if self.test_task == "pos":
             pos_batch = test_batch
-            inputT = pos_batch[0]
-            labelT = pos_batch[1]
-            maskT  = pos_batch[3]
+            inputT = pos_batch[0][:,0:MAX_POSITION]
+            labelT = pos_batch[1][:,0:MAX_POSITION]
+            maskT  = pos_batch[3][:,0:MAX_POSITION]
             predictions, _, _ = self.model.forward(inputT)
             predictions_ = predictions.argmax(dim = -1, keepdim = True)
             predT = predictions_
@@ -541,9 +541,9 @@ class MultiTaskTaggingModule(pl.LightningModule):
         
         if self.test_task == "ne":
             pos_batch = test_batch
-            inputT = pos_batch[0]
-            labelT = pos_batch[1]
-            maskT  = pos_batch[3]
+            inputT = pos_batch[0][:,0:MAX_POSITION]
+            labelT = pos_batch[1][:,0:MAX_POSITION]
+            maskT  = pos_batch[3][:,0:MAX_POSITION]
             _ , predictions, _ = self.model.forward(inputT)
             predictions_ = predictions.argmax(dim = -1, keepdim = True)
             predT = predictions_
@@ -555,9 +555,9 @@ class MultiTaskTaggingModule(pl.LightningModule):
 
         if self.test_task == "sent1" or self.test_task == "sent2":
             pos_batch = test_batch
-            inputT = pos_batch[0]
-            labelT = pos_batch[1]
-            maskT  = pos_batch[3]
+            inputT = pos_batch[0][:,0:MAX_POSITION]
+            labelT = pos_batch[1][:,0:MAX_POSITION]
+            maskT  = pos_batch[3][:,0:MAX_POSITION]
             _ , _, predictions = self.model.forward(inputT)
             predictions_ = predictions.argmax(dim = -1, keepdim = True)
             predT = predictions_
@@ -801,7 +801,6 @@ class MultiTaskTagging(Task):
         """
         Convert String to Tensor
         """
-        srcL , trgL, trgOriL = [] , [], [] #Source BPE, Target BPE, Original Target
         
         srcBPETensor = []
         trgBPETensor = []
