@@ -2,7 +2,7 @@
 BERT For Sequential Tagging
 
 # Change Log
-
+- v0.2 Add test, count and save model functionality and update test dataset for clause.
 - v0.1.5 Add NE, CLS task and POS Evaluation
 - v0.1 Add POS Tagging Task
 
@@ -11,7 +11,8 @@ BERT For Sequential Tagging
 python main.py --do test --resume [checkpoint path]
 
 # Dataset
-https://drive.google.com/file/d/1G3eF422mB46bkH4qLQVTsFm3kZ_FS5Q3/view?usp=sharing
+https://drive.google.com/file/d/1YjeFOczKv1CYwLITtm8c9PvFc5moOwZ9/view?usp=sharing
+
 
 # Dependencies
 

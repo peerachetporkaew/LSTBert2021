@@ -1,4 +1,3 @@
-from ..utils import build_dataloader
 from . import register_model
 
 import time
@@ -6,8 +5,6 @@ import torch.nn as nn
 from torch.nn import ModuleList
 import torch
 
-from fairseq.data.dictionary import Dictionary
-from fairseq.data.data_utils import collate_tokens
 from fairseq.models.roberta import RobertaModel
 
 init_funcs = {
@@ -57,12 +54,11 @@ class MultiTaskTagger(nn.Module):
 
             if self.args.do == "count":
                 """Trim roberta layer"""
+                roberta.model.decoder.sentence_encoder.layers = ModuleList([l for l in layers[0:self.args.feature_layer]])
                 layers = roberta.model.decoder.sentence_encoder.layers
                 ic(len(layers)) 
-                roberta.model.decoder.sentence_encoder.layers = ModuleList([l for l in layers[0:self.args.feature_layer]])
-                time.sleep(10)
+                time.sleep(1)
                 
-
             return roberta
 
         if pretrained == "none":

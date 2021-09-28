@@ -1,4 +1,5 @@
 
+from os import remove
 import sys 
 from pathlib import Path
 import random
@@ -20,8 +21,10 @@ def generate_sentence_boundary_dataset(path='./raw_data/lst20-sent'):
             otrainS.writelines(new_src + "\n")
             otrainL.writelines(new_lab + "\n")
 
-            otrainS.writelines(new_src + "\n")
-            otrainL.writelines(new_lab + "\n")
+            if subset != "test":
+
+                otrainS.writelines(new_src + "\n")
+                otrainL.writelines(new_lab + "\n")
         
         otrainS.close()
         otrainL.close()
@@ -47,13 +50,32 @@ def generate_shuffle_sentence_boundary_dataset(path='./raw_data/lst20-sent'):
             otrainS.writelines(new_src + "\n")
             otrainL.writelines(new_lab + "\n")
 
-            otrainS.writelines(new_src + "\n")
-            otrainL.writelines(new_lab + "\n")
+            if subset != "test":
+                otrainS.writelines(new_src + "\n")
+                otrainL.writelines(new_lab + "\n")
         
         otrainS.close()
         otrainL.close()
 
+def remove_duplicate(fin):
+
+    fp = open("./raw_data/lst20-sent2/" + fin,"r").readlines()
+    fo = open("./raw_data/lst20-sent2_new/" + fin,"w")
+    for id, line in enumerate(fp):
+        if id % 2 == 0:
+            fo.writelines(line)
+    fo.close()
 
 if __name__ == "__main__":
-    generate_sentence_boundary_dataset()
+
+    remove_duplicate("sent2.train.label")
+    remove_duplicate("sent2.train.th")
+
+    remove_duplicate("sent2.eval.label")
+    remove_duplicate("sent2.eval.th")
+
+    remove_duplicate("sent2.test.label")
+    remove_duplicate("sent2.test.th")
+
+    #generate_sentence_boundary_dataset()
     #generate_shuffle_sentence_boundary_dataset()

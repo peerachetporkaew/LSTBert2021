@@ -525,6 +525,7 @@ class MultiTaskTaggingModule(pl.LightningModule):
 
     def test_step(self,test_batch, batch_idx):
 
+
         if self.test_task == "pos":
             pos_batch = test_batch
             inputT = pos_batch[0][:,0:MAX_POSITION]
