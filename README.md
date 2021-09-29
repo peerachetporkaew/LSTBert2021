@@ -2,7 +2,7 @@
 BERT For Sequential Tagging
 
 # Change Log
-- v0.2 Add test, count and save model functionality and update test dataset for clause.
+- v0.2.1 Add test, count and save model functionality and update test dataset for clause.
 - v0.1.5 Add NE, CLS task and POS Evaluation
 - v0.1 Add POS Tagging Task
 
